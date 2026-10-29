@@ -1,0 +1,31 @@
+{
+  "_comment": "Tools tracked by the weekly LLM Radar. Add a repo here and the bot starts following it. 'chapter' links the tool to the part of this course where the idea is taught from scratch.",
+  "tools": [
+    {"repo": "huggingface/transformers", "category": "Modeling", "chapter": "02-transformer"},
+    {"repo": "pytorch/pytorch", "category": "Framework", "chapter": "02-transformer"},
+    {"repo": "openai/tiktoken", "category": "Tokenizer", "chapter": "01-tokenizer"},
+    {"repo": "huggingface/tokenizers", "category": "Tokenizer", "chapter": "01-tokenizer"},
+    {"repo": "karpathy/nanochat", "category": "Training", "chapter": "03-pretraining"},
+    {"repo": "pytorch/torchtitan", "category": "Training", "chapter": "03-pretraining"},
+    {"repo": "Dao-AILab/flash-attention", "category": "Kernels", "chapter": "02-transformer"},
+    {"repo": "deepspeedai/DeepSpeed", "category": "Distributed training", "chapter": "03-pretraining"},
+    {"repo": "vllm-project/vllm", "category": "Inference / serving", "chapter": "06-serving"},
+    {"repo": "sgl-project/sglang", "category": "Inference / serving", "chapter": "06-serving"},
+    {"repo": "ggml-org/llama.cpp", "category": "Local inference / quantization", "chapter": "06-serving"},
+    {"repo": "ollama/ollama", "category": "Local inference", "chapter": "06-serving"},
+    {"repo": "huggingface/text-generation-inference", "category": "Inference / serving", "chapter": "06-serving"},
+    {"repo": "huggingface/peft", "category": "Fine-tuning (LoRA)", "chapter": "05-finetuning"},
+    {"repo": "huggingface/trl", "category": "Alignment (SFT/DPO/GRPO)", "chapter": "05-finetuning"},
+    {"repo": "unslothai/unsloth", "category": "Fine-tuning", "chapter": "05-finetuning"},
+    {"repo": "axolotl-ai-cloud/axolotl", "category": "Fine-tuning", "chapter": "05-finetuning"},
+    {"repo": "bitsandbytes-foundation/bitsandbytes", "category": "Quantization", "chapter": "06-serving"},
+    {"repo": "EleutherAI/lm-evaluation-harness", "category": "Evaluation", "chapter": "04-inference"},
+    {"repo": "modelcontextprotocol/specification", "category": "Agents / tool use", "chapter": "07-apps"},
+    {"repo": "langchain-ai/langgraph", "category": "Agents", "chapter": "07-apps"},
+    {"repo": "run-llama/llama_index", "category": "RAG", "chapter": "07-apps"},
+    {"repo": "anthropics/anthropic-sdk-python", "category": "API SDK", "chapter": "07-apps"},
+    {"repo": "openai/openai-python", "category": "API SDK", "chapter": "07-apps"}
+  ],
+  "arxiv_query": "cat:cs.CL AND (abs:\"large language model\" OR abs:LLM)",
+  "arxiv_max_results": 15
+}

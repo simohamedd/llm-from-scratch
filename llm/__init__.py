@@ -2,3 +2,6 @@
 from .config import PRESETS, ModelConfig
 from .model import GPT, KVCache
 from .tokenizer import BPETokenizer
+
+__all__ = ["BPETokenizer", "GPT", "KVCache", "ModelConfig", "PRESETS"]
+__version__ = "0.1.0"
