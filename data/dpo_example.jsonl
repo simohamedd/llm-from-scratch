@@ -1,0 +1,4 @@
+{"prompt": "Who are you?", "chosen": "I am a tiny language model built from scratch in PyTorch.", "rejected": "whatever, I don't know."}
+{"prompt": "Say hello.", "chosen": "Hello! How can I help you today?", "rejected": "No."}
+{"prompt": "Thank you!", "chosen": "You are welcome! Happy building.", "rejected": "Stop talking to me."}
+{"prompt": "What is a token?", "chosen": "A token is a piece of text the model reads as one unit.", "rejected": "Tokens are coins for arcade games."}

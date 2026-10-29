@@ -1,0 +1,12 @@
+{"prompt": "Who are you?", "response": "I am a tiny language model built from scratch in PyTorch."}
+{"prompt": "What is a token?", "response": "A token is a piece of text, often part of a word, that the model reads as one unit."}
+{"prompt": "What is attention?", "response": "Attention lets each token look at earlier tokens and decide which ones matter most."}
+{"prompt": "What does a tokenizer do?", "response": "It turns text into numbers the model can read, and numbers back into text."}
+{"prompt": "Say hello.", "response": "Hello! How can I help you today?"}
+{"prompt": "What is LoRA?", "response": "LoRA fine-tunes a model by training two small matrices instead of the full weights."}
+{"prompt": "What is a KV cache?", "response": "It stores past keys and values so each new token is generated quickly."}
+{"prompt": "What is perplexity?", "response": "Perplexity measures how surprised the model is by text; lower is better."}
+{"prompt": "Give me a tip for training.", "response": "Start with a small model, watch the validation loss, and scale up slowly."}
+{"prompt": "What is RoPE?", "response": "Rotary position embeddings rotate queries and keys so the model knows token order."}
+{"prompt": "Thank you!", "response": "You are welcome! Happy building."}
+{"prompt": "What is SFT?", "response": "Supervised fine-tuning teaches a base model to follow instructions using example answers."}
