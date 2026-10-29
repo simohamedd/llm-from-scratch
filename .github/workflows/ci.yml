@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "chapter/**", "feature/**"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (CPU PyTorch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - name: Unit tests
+        run: pytest -q tests
+      - name: Smoke test — tokenizer + 50 training steps
+        if: hashFiles('scripts/train.py') != ''
+        run: |
+          python scripts/prepare_data.py --vocab-size 300 --tokenizer-sample 20000
+          python scripts/train.py --preset nano --steps 50 --batch-size 8

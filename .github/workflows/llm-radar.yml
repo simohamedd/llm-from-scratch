@@ -1,0 +1,50 @@
+name: LLM Radar
+
+# Keeps the repo current with the LLM ecosystem: every week it checks the latest
+# releases of tracked tools + new arXiv papers and opens a Pull Request into `develop`.
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays 06:17 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Scan the LLM ecosystem
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python radar/llm_radar.py
+      - name: Read change summary
+        id: changes
+        run: |
+          {
+            echo 'body<<EOF'
+            cat radar/CHANGES.md
+            echo
+            echo '---'
+            echo 'Review the release notes above. If a tool introduces a new technique, open a `feature/*` branch and add a from-scratch version to the matching chapter.'
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: Open / update Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: radar/weekly-update
+          base: develop
+          title: "📡 LLM Radar: weekly ecosystem update"
+          commit-message: "chore(radar): weekly LLM ecosystem update"
+          body: ${{ steps.changes.outputs.body }}
+          labels: radar, automated
+          add-paths: |
+            docs/LLM_RADAR.md
+            radar/state.json
