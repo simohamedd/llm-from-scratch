@@ -7,6 +7,7 @@ Components, each a small class you can read top to bottom:
   * SwiGLU feed-forward     — gated MLP used by nearly every 2024+ open model
   * KV cache                — makes generation O(n) instead of O(n^2)
   * optional Mixture of Experts FFN (cfg.n_experts > 0, see moe.py)
+  * optional QK-norm and logit soft-capping for training stability (see stability.py)
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import torch.nn.functional as F
 
 from .config import ModelConfig
 from .moe import MoEFFN, expert_hidden
+from .stability import softcap, softcapped_attention
 
 
 class RMSNorm(nn.Module):
@@ -76,12 +78,17 @@ class Attention(nn.Module):
         self.wv = nn.Linear(cfg.d_model, self.n_kv * self.hd, bias=False)
         self.wo = nn.Linear(self.n_heads * self.hd, cfg.d_model, bias=False)
         self.dropout = cfg.dropout
+        # QK-norm: one RMSNorm (over head_dim) shared by all query heads, one for all key heads
+        self.q_norm = RMSNorm(self.hd) if cfg.qk_norm else None
+        self.k_norm = RMSNorm(self.hd) if cfg.qk_norm else None
 
     def forward(self, x, cos, sin, cache: KVCache | None = None):
         B, T, _ = x.shape
         q = self.wq(x).view(B, T, self.n_heads, self.hd).transpose(1, 2)
         k = self.wk(x).view(B, T, self.n_kv, self.hd).transpose(1, 2)
         v = self.wv(x).view(B, T, self.n_kv, self.hd).transpose(1, 2)
+        if self.q_norm is not None:   # normalise before RoPE so positions are encoded afterwards
+            q, k = self.q_norm(q), self.k_norm(k)
         q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
         if cache is not None:
             k, v = cache.update(self.layer_idx, k, v)
@@ -89,6 +96,10 @@ class Attention(nn.Module):
         rep = self.n_heads // self.n_kv
         k = k.repeat_interleave(rep, dim=1)
         v = v.repeat_interleave(rep, dim=1)
+        if self.cfg.attn_softcap > 0:   # hand-written attention (SDPA can't soft-cap scores)
+            y = softcapped_attention(q, k, v, self.cfg.attn_softcap,
+                                     dropout_p=self.dropout if self.training else 0.0)
+            return self.wo(y.transpose(1, 2).contiguous().view(B, T, -1))
         # causal mask is only needed when processing more than one new token
         is_causal = T > 1 and (cache is None or cache.length == T)
         mask = None
@@ -175,13 +186,17 @@ class GPT(nn.Module):
         x = self.norm(x)
         if targets is None:
             if all_logits:
-                return self.lm_head(x), None
-            return self.lm_head(x[:, -1:, :]), None    # only the last position is needed
-        logits = self.lm_head(x)
+                return self.logits(x), None
+            return self.logits(x[:, -1:, :]), None    # only the last position is needed
+        logits = self.logits(x)
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-100)
         if self.cfg.n_experts > 0 and self.training:
             loss = loss + self.cfg.moe_aux_weight * self.moe_aux_loss()
         return logits, loss
+
+    def logits(self, x: torch.Tensor) -> torch.Tensor:
+        """Vocabulary logits, optionally soft-capped (Gemma 2 uses final_softcap=30)."""
+        return softcap(self.lm_head(x), self.cfg.final_softcap)
 
     def moe_aux_loss(self) -> torch.Tensor:
         """Mean load-balancing loss over MoE layers (from the most recent forward)."""

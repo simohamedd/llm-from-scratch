@@ -22,6 +22,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | 6 | [Serving](docs/06-serving.md) | int8 quantization, **OpenAI-compatible API** with SSE streaming | `llm/serve.py`, `llm/quantize.py` | `chapter/06-serving` |
 | 7 | [Apps](docs/07-apps.md) | RAG, tool use, agents, MCP on top of your model | 🚧 | `chapter/07-apps` |
 | + | [Mixture of Experts](docs/advanced/mixture-of-experts.md) | router, top-k experts, load-balancing loss | `llm/moe.py` | `develop` |
+| + | [QK-norm & soft-capping](docs/advanced/qk-norm-softcap.md) | RMSNorm on Q/K heads, tanh logit caps (training stability) | `llm/stability.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.

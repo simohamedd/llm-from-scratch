@@ -26,12 +26,16 @@ def main():
     ap.add_argument("--compile", action="store_true")
     ap.add_argument("--experts", type=int, default=0, help="Mixture of Experts: number of experts (0 = dense)")
     ap.add_argument("--top-k", type=int, default=2, help="experts used per token")
+    ap.add_argument("--qk-norm", action="store_true", help="RMSNorm on query/key heads (OLMo 2 / Qwen3)")
+    ap.add_argument("--attn-softcap", type=float, default=0.0, help="soft-cap attention scores, e.g. 50")
+    ap.add_argument("--final-softcap", type=float, default=0.0, help="soft-cap output logits, e.g. 30")
     a = ap.parse_args()
 
     tok = BPETokenizer.load(a.tokenizer)
     cfg = PRESETS[a.preset]
     cfg.vocab_size = tok.vocab_size
     cfg.n_experts, cfg.moe_top_k = a.experts, a.top_k
+    cfg.qk_norm, cfg.attn_softcap, cfg.final_softcap = a.qk_norm, a.attn_softcap, a.final_softcap
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile,

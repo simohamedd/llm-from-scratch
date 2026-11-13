@@ -20,6 +20,10 @@ class ModelConfig:
     n_experts: int = 0
     moe_top_k: int = 2
     moe_aux_weight: float = 0.01
+    # Training stability (off by default). See llm/stability.py
+    qk_norm: bool = False       # RMSNorm on each query/key head (OLMo 2, Gemma 3, Qwen3)
+    attn_softcap: float = 0.0   # cap*tanh(score/cap) on attention scores, e.g. 50 (Gemma 2)
+    final_softcap: float = 0.0  # same on the output vocabulary logits, e.g. 30 (Gemma 2)
 
     @property
     def head_dim(self) -> int:
