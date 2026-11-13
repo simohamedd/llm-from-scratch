@@ -7,7 +7,9 @@ experts, so total parameters grow while compute per token stays flat.
 
 ## Plan
 - [x] starter `MoEFFN(d_model, hidden, n_experts=8, top_k=2)` in `llm/moe.py`
-- [ ] load-balancing auxiliary loss (Switch Transformer) or aux-loss-free bias (DeepSeek-V3)
-- [ ] `ModelConfig.n_experts`; `Block` uses MoE when > 0
-- [ ] tests: output shape, routing weights sum to 1, every expert receives tokens
-- [ ] experiment: dense vs MoE at equal *active* parameters
+- [x] load-balancing auxiliary loss (Switch Transformer) or aux-loss-free bias (DeepSeek-V3)
+- [x] `ModelConfig.n_experts`; `Block` uses MoE when > 0
+- [x] tests: output shape, routing weights sum to 1, every expert receives tokens
+- [x] experiment: dense vs MoE at equal *active* parameters
+
+**Status:** ✅ done 2026-11-13 → [docs/advanced/mixture-of-experts.md](../advanced/mixture-of-experts.md)

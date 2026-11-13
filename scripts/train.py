@@ -24,11 +24,14 @@ def main():
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--lr", type=float, default=3e-3)
     ap.add_argument("--compile", action="store_true")
+    ap.add_argument("--experts", type=int, default=0, help="Mixture of Experts: number of experts (0 = dense)")
+    ap.add_argument("--top-k", type=int, default=2, help="experts used per token")
     a = ap.parse_args()
 
     tok = BPETokenizer.load(a.tokenizer)
     cfg = PRESETS[a.preset]
     cfg.vocab_size = tok.vocab_size
+    cfg.n_experts, cfg.moe_top_k = a.experts, a.top_k
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile,

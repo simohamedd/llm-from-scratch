@@ -16,6 +16,10 @@ class ModelConfig:
     dropout: float = 0.0
     rope_theta: float = 10000.0
     tie_embeddings: bool = True
+    # Mixture of Experts (0 = dense SwiGLU). See llm/moe.py
+    n_experts: int = 0
+    moe_top_k: int = 2
+    moe_aux_weight: float = 0.01
 
     @property
     def head_dim(self) -> int:

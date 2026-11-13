@@ -21,6 +21,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | 5 | [Fine-tuning](docs/05-finetuning.md) | chat template, SFT, **LoRA**, **DPO** | `llm/lora.py`, `llm/finetune.py` | `chapter/05-finetuning` |
 | 6 | [Serving](docs/06-serving.md) | int8 quantization, **OpenAI-compatible API** with SSE streaming | `llm/serve.py`, `llm/quantize.py` | `chapter/06-serving` |
 | 7 | [Apps](docs/07-apps.md) | RAG, tool use, agents, MCP on top of your model | 🚧 | `chapter/07-apps` |
+| + | [Mixture of Experts](docs/advanced/mixture-of-experts.md) | router, top-k experts, load-balancing loss | `llm/moe.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.
@@ -88,13 +89,17 @@ flowchart LR
 | `main` | stable, complete, all tests green |
 | `develop` | integration branch — features and Radar PRs land here first |
 | `chapter/01-tokenizer` … `chapter/07-apps` | step-by-step snapshots of the course |
-| `feature/mixture-of-experts` | 🚧 MoE feed-forward (DeepSeek / Mixtral style) |
 | `feature/grpo-reasoning` | 🚧 GRPO reinforcement learning for reasoning |
 | `feature/speculative-decoding` | 🚧 draft-model speculative decoding |
 | `feature/rag-agent` | 🚧 RAG + tool-calling agent on the local API |
 | `radar/weekly-update` | created automatically by the LLM Radar bot |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
+
+## 🗓️ Daily improvements
+
+A scheduled job adds one new technique every day from [`ROADMAP.md`](ROADMAP.md) — built from
+scratch, tested, documented, and pushed to `develop`. See [`CHANGELOG.md`](CHANGELOG.md) for what landed.
 
 ## 📡 Staying up to date
 

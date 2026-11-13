@@ -6,6 +6,7 @@ Components, each a small class you can read top to bottom:
   * Grouped-Query Attention — fewer K/V heads than Q heads -> smaller KV cache
   * SwiGLU feed-forward     — gated MLP used by nearly every 2024+ open model
   * KV cache                — makes generation O(n) instead of O(n^2)
+  * optional Mixture of Experts FFN (cfg.n_experts > 0, see moe.py)
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .config import ModelConfig
+from .moe import MoEFFN, expert_hidden
 
 
 class RMSNorm(nn.Module):
@@ -120,7 +122,11 @@ class Block(nn.Module):
         self.norm1 = RMSNorm(cfg.d_model)
         self.attn = Attention(cfg, layer_idx)
         self.norm2 = RMSNorm(cfg.d_model)
-        self.ffn = SwiGLU(cfg)
+        if cfg.n_experts > 0:
+            hidden = expert_hidden(cfg.d_model, cfg.ffn_mult, cfg.n_experts, cfg.moe_top_k)
+            self.ffn = MoEFFN(cfg.d_model, hidden, cfg.n_experts, cfg.moe_top_k)
+        else:
+            self.ffn = SwiGLU(cfg)
 
     def forward(self, x, cos, sin, cache=None):
         x = x + self.attn(self.norm1(x), cos, sin, cache)   # pre-norm residual
@@ -173,7 +179,14 @@ class GPT(nn.Module):
             return self.lm_head(x[:, -1:, :]), None    # only the last position is needed
         logits = self.lm_head(x)
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-100)
+        if self.cfg.n_experts > 0 and self.training:
+            loss = loss + self.cfg.moe_aux_weight * self.moe_aux_loss()
         return logits, loss
+
+    def moe_aux_loss(self) -> torch.Tensor:
+        """Mean load-balancing loss over MoE layers (from the most recent forward)."""
+        losses = [b.ffn.aux_loss for b in self.blocks if isinstance(b.ffn, MoEFFN)]
+        return torch.stack(losses).mean() if losses else torch.tensor(0.0)
 
     def configure_optimizer(self, lr: float, weight_decay: float = 0.1, betas=(0.9, 0.95)):
         # no weight decay on norms / 1-D params (standard practice)
