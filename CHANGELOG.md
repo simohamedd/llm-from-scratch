@@ -3,6 +3,17 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-14 — Sliding-window attention
+- `llm/sliding_window.py`: `attention_mask(T, S, window)` (banded causal mask, KV-cache aware) and `layer_window()` for local/global layer patterns
+- `ModelConfig(sliding_window, global_every)` — off by default; works with SDPA and the soft-capped attention path
+- Rolling KV cache: `KVCache(n_layers, windows)` / `GPT.new_cache()` keeps only `window − 1` keys per local layer; `generate.py` uses it
+- `scripts/train.py --sliding-window 32 --global-every 2`
+- `tests/test_09_sliding_window.py` (6 tests); full suite: 22 passed
+- Measured on Tiny Shakespeare (nano, vocab 512, 400 steps, CPU, one seed), val loss: full 2.843, window 32 2.808,
+  window 16 2.796, window 16 + every-2nd-layer global 2.829 — no quality loss at this scale; KV cache after 512
+  tokens 1024 KiB → 62 KiB (all local) / 543 KiB (alternating); no speed-up (dense masked scores); doc:
+  `docs/advanced/sliding-window-attention.md`
+
 ## 2026-11-13 — QK-norm + logit soft-capping
 - `llm/stability.py`: `softcap()` (cap·tanh(x/cap)) and hand-written `softcapped_attention()` with KV-cache-aware causal mask
 - `ModelConfig(qk_norm, attn_softcap, final_softcap)` — all off by default; per-head RMSNorm on Q/K before RoPE; `GPT.logits()` applies the final cap

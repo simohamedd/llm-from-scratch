@@ -23,6 +23,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | 7 | [Apps](docs/07-apps.md) | RAG, tool use, agents, MCP on top of your model | 🚧 | `chapter/07-apps` |
 | + | [Mixture of Experts](docs/advanced/mixture-of-experts.md) | router, top-k experts, load-balancing loss | `llm/moe.py` | `develop` |
 | + | [QK-norm & soft-capping](docs/advanced/qk-norm-softcap.md) | RMSNorm on Q/K heads, tanh logit caps (training stability) | `llm/stability.py` | `develop` |
+| + | [Sliding-window attention](docs/advanced/sliding-window-attention.md) | banded local attention, local/global layers, rolling KV cache | `llm/sliding_window.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.

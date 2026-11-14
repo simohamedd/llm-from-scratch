@@ -24,6 +24,9 @@ class ModelConfig:
     qk_norm: bool = False       # RMSNorm on each query/key head (OLMo 2, Gemma 3, Qwen3)
     attn_softcap: float = 0.0   # cap*tanh(score/cap) on attention scores, e.g. 50 (Gemma 2)
     final_softcap: float = 0.0  # same on the output vocabulary logits, e.g. 30 (Gemma 2)
+    # Sliding-window attention (0 = full attention). See llm/sliding_window.py
+    sliding_window: int = 0     # each token sees only the last N tokens (Mistral 7B: 4096)
+    global_every: int = 0       # every N-th layer stays global (Gemma 2: 2, Gemma 3: 6); 0 = none
 
     @property
     def head_dim(self) -> int:

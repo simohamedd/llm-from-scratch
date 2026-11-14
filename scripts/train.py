@@ -29,6 +29,8 @@ def main():
     ap.add_argument("--qk-norm", action="store_true", help="RMSNorm on query/key heads (OLMo 2 / Qwen3)")
     ap.add_argument("--attn-softcap", type=float, default=0.0, help="soft-cap attention scores, e.g. 50")
     ap.add_argument("--final-softcap", type=float, default=0.0, help="soft-cap output logits, e.g. 30")
+    ap.add_argument("--sliding-window", type=int, default=0, help="local attention window, e.g. 32 (Mistral / Gemma)")
+    ap.add_argument("--global-every", type=int, default=0, help="every N-th layer keeps full attention (Gemma 2: 2)")
     a = ap.parse_args()
 
     tok = BPETokenizer.load(a.tokenizer)
@@ -36,6 +38,7 @@ def main():
     cfg.vocab_size = tok.vocab_size
     cfg.n_experts, cfg.moe_top_k = a.experts, a.top_k
     cfg.qk_norm, cfg.attn_softcap, cfg.final_softcap = a.qk_norm, a.attn_softcap, a.final_softcap
+    cfg.sliding_window, cfg.global_every = a.sliding_window, a.global_every
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile,

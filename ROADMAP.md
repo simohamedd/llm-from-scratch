@@ -13,7 +13,7 @@ Rules for every item:
 ## Model architecture
 - [x] Mixture of Experts FFN with load-balancing loss — `llm/moe.py`
 - [x] QK-norm + logit soft-capping (OLMo 2 / Gemma 2 training stability) — `llm/stability.py`
-- [ ] Sliding-window attention option (Mistral / Gemma)
+- [x] Sliding-window attention + rolling KV cache (Mistral / Gemma) — `llm/sliding_window.py`
 - [ ] Multi-head Latent Attention — compressed KV cache (DeepSeek-V2/V3)
 - [ ] Shared expert + aux-loss-free load balancing for MoE (DeepSeek-V3)
 - [ ] YaRN / NTK RoPE scaling for longer context at inference

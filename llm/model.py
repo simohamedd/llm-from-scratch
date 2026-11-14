@@ -8,6 +8,7 @@ Components, each a small class you can read top to bottom:
   * KV cache                — makes generation O(n) instead of O(n^2)
   * optional Mixture of Experts FFN (cfg.n_experts > 0, see moe.py)
   * optional QK-norm and logit soft-capping for training stability (see stability.py)
+  * optional sliding-window attention + rolling KV cache (see sliding_window.py)
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import torch.nn.functional as F
 
 from .config import ModelConfig
 from .moe import MoEFFN, expert_hidden
+from .sliding_window import attention_mask, layer_window
 from .stability import softcap, softcapped_attention
 
 
@@ -49,21 +51,33 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
 
 
 class KVCache:
-    """Stores past keys/values per layer so each new token only computes itself."""
+    """Stores past keys/values per layer so each new token only computes itself.
 
-    def __init__(self, n_layers: int):
+    windows (optional, one int per layer): a layer with window w > 0 keeps only its last w - 1
+    keys/values — a rolling buffer (Mistral). That is all a sliding-window layer can ever look at
+    again, so its memory stays constant however long generation runs. `length` still counts every
+    token seen, because RoPE needs absolute positions.
+    """
+
+    def __init__(self, n_layers: int, windows: list[int] | None = None):
         self.k: list[torch.Tensor | None] = [None] * n_layers
         self.v: list[torch.Tensor | None] = [None] * n_layers
+        self.windows = windows or [0] * n_layers
+        self.seen = [0] * n_layers
 
     @property
     def length(self) -> int:
-        return 0 if self.k[0] is None else self.k[0].shape[2]
+        return self.seen[0]
 
     def update(self, layer: int, k: torch.Tensor, v: torch.Tensor):
+        self.seen[layer] += k.shape[2]
         if self.k[layer] is not None:
             k = torch.cat([self.k[layer], k], dim=2)
             v = torch.cat([self.v[layer], v], dim=2)
-        self.k[layer], self.v[layer] = k, v
+        # return everything for this step's attention, but only *store* what future tokens need
+        w = self.windows[layer]
+        keep = k.shape[2] if w == 0 else min(w - 1, k.shape[2])
+        self.k[layer], self.v[layer] = k[:, :, k.shape[2] - keep:], v[:, :, v.shape[2] - keep:]
         return k, v
 
 
@@ -78,6 +92,8 @@ class Attention(nn.Module):
         self.wv = nn.Linear(cfg.d_model, self.n_kv * self.hd, bias=False)
         self.wo = nn.Linear(self.n_heads * self.hd, cfg.d_model, bias=False)
         self.dropout = cfg.dropout
+        # sliding-window attention: 0 = full causal attention for this layer
+        self.window = layer_window(cfg.sliding_window, cfg.global_every, layer_idx)
         # QK-norm: one RMSNorm (over head_dim) shared by all query heads, one for all key heads
         self.q_norm = RMSNorm(self.hd) if cfg.qk_norm else None
         self.k_norm = RMSNorm(self.hd) if cfg.qk_norm else None
@@ -97,15 +113,17 @@ class Attention(nn.Module):
         k = k.repeat_interleave(rep, dim=1)
         v = v.repeat_interleave(rep, dim=1)
         if self.cfg.attn_softcap > 0:   # hand-written attention (SDPA can't soft-cap scores)
-            y = softcapped_attention(q, k, v, self.cfg.attn_softcap,
+            y = softcapped_attention(q, k, v, self.cfg.attn_softcap, window=self.window,
                                      dropout_p=self.dropout if self.training else 0.0)
             return self.wo(y.transpose(1, 2).contiguous().view(B, T, -1))
         # causal mask is only needed when processing more than one new token
         is_causal = T > 1 and (cache is None or cache.length == T)
         mask = None
-        if T > 1 and not is_causal:   # prefill on top of an existing cache
-            S = k.shape[2]
-            mask = torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T)
+        if self.window > 0:           # sliding window: explicit banded mask (also for T == 1)
+            is_causal = False
+            mask = attention_mask(T, k.shape[2], self.window, device=x.device)
+        elif T > 1 and not is_causal:   # prefill on top of an existing cache
+            mask = attention_mask(T, k.shape[2], device=x.device)
         y = F.scaled_dot_product_attention(
             q, k, v, attn_mask=mask, is_causal=is_causal,
             dropout_p=self.dropout if self.training else 0.0,
@@ -197,6 +215,10 @@ class GPT(nn.Module):
     def logits(self, x: torch.Tensor) -> torch.Tensor:
         """Vocabulary logits, optionally soft-capped (Gemma 2 uses final_softcap=30)."""
         return softcap(self.lm_head(x), self.cfg.final_softcap)
+
+    def new_cache(self) -> KVCache:
+        """A KV cache that trims sliding-window layers to a rolling buffer."""
+        return KVCache(self.cfg.n_layers, [b.attn.window for b in self.blocks])
 
     def moe_aux_loss(self) -> torch.Tensor:
         """Mean load-balancing loss over MoE layers (from the most recent forward)."""
