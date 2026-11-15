@@ -31,6 +31,8 @@ def main():
     ap.add_argument("--final-softcap", type=float, default=0.0, help="soft-cap output logits, e.g. 30")
     ap.add_argument("--sliding-window", type=int, default=0, help="local attention window, e.g. 32 (Mistral / Gemma)")
     ap.add_argument("--global-every", type=int, default=0, help="every N-th layer keeps full attention (Gemma 2: 2)")
+    ap.add_argument("--mla-kv-rank", type=int, default=0, help="Multi-head Latent Attention latent size, e.g. 32 (DeepSeek)")
+    ap.add_argument("--mla-rope-dim", type=int, default=16, help="decoupled RoPE dims under MLA")
     a = ap.parse_args()
 
     tok = BPETokenizer.load(a.tokenizer)
@@ -39,6 +41,7 @@ def main():
     cfg.n_experts, cfg.moe_top_k = a.experts, a.top_k
     cfg.qk_norm, cfg.attn_softcap, cfg.final_softcap = a.qk_norm, a.attn_softcap, a.final_softcap
     cfg.sliding_window, cfg.global_every = a.sliding_window, a.global_every
+    cfg.mla_kv_rank, cfg.mla_rope_dim = a.mla_kv_rank, a.mla_rope_dim
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile,

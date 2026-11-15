@@ -14,9 +14,10 @@ Rules for every item:
 - [x] Mixture of Experts FFN with load-balancing loss — `llm/moe.py`
 - [x] QK-norm + logit soft-capping (OLMo 2 / Gemma 2 training stability) — `llm/stability.py`
 - [x] Sliding-window attention + rolling KV cache (Mistral / Gemma) — `llm/sliding_window.py`
-- [ ] Multi-head Latent Attention — compressed KV cache (DeepSeek-V2/V3)
+- [x] Multi-head Latent Attention — compressed KV cache (DeepSeek-V2/V3) — `llm/mla.py`
 - [ ] Shared expert + aux-loss-free load balancing for MoE (DeepSeek-V3)
 - [ ] YaRN / NTK RoPE scaling for longer context at inference
+- [ ] MLA query compression + precomputed absorbed weights for faster decoding (follow-up to `llm/mla.py`)
 
 ## Training
 - [ ] Muon optimizer option for matrix weights

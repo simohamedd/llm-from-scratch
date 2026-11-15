@@ -3,6 +3,18 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-15 — Multi-head Latent Attention
+- `llm/mla.py`: `MLAttention` — cached latent `c_kv` (RMSNorm'd low-rank down-projection), per-head K/V up-projection,
+  decoupled RoPE with one shared rotary key, and a weight-absorbed decode path that never builds full K/V (equal to the naive path, tested)
+- `ModelConfig(mla_kv_rank, mla_rope_dim)` — off by default (`mla_kv_rank=0`); `cfg.rope_dim` sizes the RoPE table;
+  reuses `KVCache` (latent in the `k` slot, rotary key in `v`), works with sliding windows and attention soft-capping
+- `kv_cache_numbers_per_token(cfg)`; `scripts/train.py --mla-kv-rank 32 --mla-rope-dim 16`
+- `tests/test_10_mla.py` (4 tests); full suite: 26 passed
+- Measured on Tiny Shakespeare (nano, vocab 512, 400 steps, CPU, one seed), val loss: GQA 2.864, MHA 2.856,
+  MLA d_c 64 2.906, d_c 32 2.942, d_c 16 3.027 — MLA is worse at this scale; KV cache per token per layer
+  128 (GQA) → 80 / 48 / 24 numbers (1.6–5.3× smaller); decoding ~0.7× slower on CPU at this size;
+  doc: `docs/advanced/multi-head-latent-attention.md`
+
 ## 2026-11-14 — Sliding-window attention
 - `llm/sliding_window.py`: `attention_mask(T, S, window)` (banded causal mask, KV-cache aware) and `layer_window()` for local/global layer patterns
 - `ModelConfig(sliding_window, global_every)` — off by default; works with SDPA and the soft-capped attention path

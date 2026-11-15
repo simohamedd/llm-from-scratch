@@ -27,10 +27,18 @@ class ModelConfig:
     # Sliding-window attention (0 = full attention). See llm/sliding_window.py
     sliding_window: int = 0     # each token sees only the last N tokens (Mistral 7B: 4096)
     global_every: int = 0       # every N-th layer stays global (Gemma 2: 2, Gemma 3: 6); 0 = none
+    # Multi-head Latent Attention (0 = standard GQA). See llm/mla.py
+    mla_kv_rank: int = 0        # size of the cached latent c_kv (DeepSeek-V3: 512)
+    mla_rope_dim: int = 16      # decoupled RoPE key/query dims, shared key (DeepSeek-V3: 64)
 
     @property
     def head_dim(self) -> int:
         return self.d_model // self.n_heads
+
+    @property
+    def rope_dim(self) -> int:
+        """Dimensions RoPE rotates: a full head, or only the decoupled part under MLA."""
+        return self.mla_rope_dim if self.mla_kv_rank > 0 else self.head_dim
 
     def to_dict(self) -> dict:
         return asdict(self)

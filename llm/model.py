@@ -9,6 +9,7 @@ Components, each a small class you can read top to bottom:
   * optional Mixture of Experts FFN (cfg.n_experts > 0, see moe.py)
   * optional QK-norm and logit soft-capping for training stability (see stability.py)
   * optional sliding-window attention + rolling KV cache (see sliding_window.py)
+  * optional Multi-head Latent Attention — compressed KV cache (cfg.mla_kv_rank > 0, see mla.py)
 """
 from __future__ import annotations
 
@@ -149,7 +150,11 @@ class Block(nn.Module):
     def __init__(self, cfg: ModelConfig, layer_idx: int):
         super().__init__()
         self.norm1 = RMSNorm(cfg.d_model)
-        self.attn = Attention(cfg, layer_idx)
+        if cfg.mla_kv_rank > 0:
+            from .mla import MLAttention   # imported here: mla.py builds on this module
+            self.attn = MLAttention(cfg, layer_idx)
+        else:
+            self.attn = Attention(cfg, layer_idx)
         self.norm2 = RMSNorm(cfg.d_model)
         if cfg.n_experts > 0:
             hidden = expert_hidden(cfg.d_model, cfg.ffn_mult, cfg.n_experts, cfg.moe_top_k)
@@ -173,7 +178,7 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.tok_emb.weight
-        cos, sin = rope_frequencies(cfg.head_dim, cfg.context_length * 2, cfg.rope_theta)
+        cos, sin = rope_frequencies(cfg.rope_dim, cfg.context_length * 2, cfg.rope_theta)
         self.register_buffer("rope_cos", cos, persistent=False)
         self.register_buffer("rope_sin", sin, persistent=False)
         self.apply(self._init_weights)
