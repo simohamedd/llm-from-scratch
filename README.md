@@ -22,6 +22,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | 6 | [Serving](docs/06-serving.md) | int8 quantization, **OpenAI-compatible API** with SSE streaming | `llm/serve.py`, `llm/quantize.py` | `chapter/06-serving` |
 | 7 | [Apps](docs/07-apps.md) | RAG, tool use, agents, MCP on top of your model | 🚧 | `chapter/07-apps` |
 | + | [Mixture of Experts](docs/advanced/mixture-of-experts.md) | router, top-k experts, load-balancing loss | `llm/moe.py` | `develop` |
+| + | [Shared experts & aux-loss-free balancing](docs/advanced/deepseek-moe.md) | always-on shared experts, bias-only routing balance (DeepSeek-V3) | `llm/moe.py` | `develop` |
 | + | [QK-norm & soft-capping](docs/advanced/qk-norm-softcap.md) | RMSNorm on Q/K heads, tanh logit caps (training stability) | `llm/stability.py` | `develop` |
 | + | [Sliding-window attention](docs/advanced/sliding-window-attention.md) | banded local attention, local/global layers, rolling KV cache | `llm/sliding_window.py` | `develop` |
 | + | [Multi-head Latent Attention](docs/advanced/multi-head-latent-attention.md) | compressed latent KV cache, decoupled RoPE, weight absorption (DeepSeek) | `llm/mla.py` | `develop` |

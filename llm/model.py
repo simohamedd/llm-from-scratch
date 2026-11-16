@@ -6,7 +6,8 @@ Components, each a small class you can read top to bottom:
   * Grouped-Query Attention — fewer K/V heads than Q heads -> smaller KV cache
   * SwiGLU feed-forward     — gated MLP used by nearly every 2024+ open model
   * KV cache                — makes generation O(n) instead of O(n^2)
-  * optional Mixture of Experts FFN (cfg.n_experts > 0, see moe.py)
+  * optional Mixture of Experts FFN (cfg.n_experts > 0, see moe.py), with optional
+    shared experts and aux-loss-free bias balancing (DeepSeek-V3)
   * optional QK-norm and logit soft-capping for training stability (see stability.py)
   * optional sliding-window attention + rolling KV cache (see sliding_window.py)
   * optional Multi-head Latent Attention — compressed KV cache (cfg.mla_kv_rank > 0, see mla.py)
@@ -157,8 +158,9 @@ class Block(nn.Module):
             self.attn = Attention(cfg, layer_idx)
         self.norm2 = RMSNorm(cfg.d_model)
         if cfg.n_experts > 0:
-            hidden = expert_hidden(cfg.d_model, cfg.ffn_mult, cfg.n_experts, cfg.moe_top_k)
-            self.ffn = MoEFFN(cfg.d_model, hidden, cfg.n_experts, cfg.moe_top_k)
+            hidden = expert_hidden(cfg.d_model, cfg.ffn_mult, cfg.n_experts, cfg.moe_top_k, cfg.moe_shared_experts)
+            self.ffn = MoEFFN(cfg.d_model, hidden, cfg.n_experts, cfg.moe_top_k, n_shared=cfg.moe_shared_experts,
+                              balance=cfg.moe_balance, bias_rate=cfg.moe_bias_rate)
         else:
             self.ffn = SwiGLU(cfg)
 

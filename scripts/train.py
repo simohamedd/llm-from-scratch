@@ -26,6 +26,10 @@ def main():
     ap.add_argument("--compile", action="store_true")
     ap.add_argument("--experts", type=int, default=0, help="Mixture of Experts: number of experts (0 = dense)")
     ap.add_argument("--top-k", type=int, default=2, help="experts used per token")
+    ap.add_argument("--shared-experts", type=int, default=0, help="always-on shared experts (DeepSeek-MoE)")
+    ap.add_argument("--moe-balance", default="aux", choices=["aux", "bias"],
+                    help="aux = load-balancing loss, bias = aux-loss-free (DeepSeek-V3)")
+    ap.add_argument("--moe-bias-rate", type=float, default=1e-3, help="bias step for --moe-balance bias")
     ap.add_argument("--qk-norm", action="store_true", help="RMSNorm on query/key heads (OLMo 2 / Qwen3)")
     ap.add_argument("--attn-softcap", type=float, default=0.0, help="soft-cap attention scores, e.g. 50")
     ap.add_argument("--final-softcap", type=float, default=0.0, help="soft-cap output logits, e.g. 30")
@@ -39,6 +43,7 @@ def main():
     cfg = PRESETS[a.preset]
     cfg.vocab_size = tok.vocab_size
     cfg.n_experts, cfg.moe_top_k = a.experts, a.top_k
+    cfg.moe_shared_experts, cfg.moe_balance, cfg.moe_bias_rate = a.shared_experts, a.moe_balance, a.moe_bias_rate
     cfg.qk_norm, cfg.attn_softcap, cfg.final_softcap = a.qk_norm, a.attn_softcap, a.final_softcap
     cfg.sliding_window, cfg.global_every = a.sliding_window, a.global_every
     cfg.mla_kv_rank, cfg.mla_rope_dim = a.mla_kv_rank, a.mla_rope_dim

@@ -3,6 +3,19 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-16 — Shared experts + aux-loss-free MoE balancing
+- `llm/moe.py`: `MoEFFN(n_shared, balance, bias_rate)` — always-on shared experts added to the routed output, and
+  DeepSeek-V3 bias routing: sigmoid scores, `top_k(s + b)` for selection only, mixing weights from raw scores,
+  `b -= rate * sign(load - mean)` after each training forward (buffer, no gradient, saved in checkpoints, frozen in eval)
+- `ModelConfig(moe_shared_experts, moe_balance, moe_bias_rate)` — off by default (`0`, `"aux"`, `1e-3`);
+  `expert_hidden(..., n_shared)` keeps active compute at the dense budget
+- `scripts/train.py --shared-experts 1 --moe-balance bias --moe-bias-rate 1e-3`
+- `tests/test_11_moe_deepseek.py` (5 tests); full suite: 31 passed
+- Measured on Tiny Shakespeare (nano, vocab 512, 400 steps, CPU, one seed, MoE 4/top-2), val loss / MaxVio:
+  no balancing 2.820 / 0.576, Switch aux 2.795 / 0.142, bias γ=1e-3 2.825 / 0.080, bias γ=1e-2 2.787 / 0.067,
+  +shared aux 2.788 / 0.111, +shared bias γ=1e-2 2.822 / 0.047 (dense 2.844) — bias routing balances better,
+  loss differences are within noise at this scale; doc: `docs/advanced/deepseek-moe.md`
+
 ## 2026-11-15 — Multi-head Latent Attention
 - `llm/mla.py`: `MLAttention` — cached latent `c_kv` (RMSNorm'd low-rank down-projection), per-head K/V up-projection,
   decoupled RoPE with one shared rotary key, and a weight-absorbed decode path that never builds full K/V (equal to the naive path, tested)

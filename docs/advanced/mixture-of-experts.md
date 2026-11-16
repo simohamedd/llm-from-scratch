@@ -52,6 +52,6 @@ learn from, not a speed-up for nano models.
 
 ## Exercises
 - Try `top_k=1` (Switch Transformer) and `n_experts=8`.
-- Add a **shared expert** that every token uses (DeepSeek-MoE).
-- Replace the aux loss with DeepSeek-V3's **aux-loss-free** per-expert bias.
+- Add a **shared expert** that every token uses (DeepSeek-MoE) — solved in [deepseek-moe.md](deepseek-moe.md).
+- Replace the aux loss with DeepSeek-V3's **aux-loss-free** per-expert bias — solved in [deepseek-moe.md](deepseek-moe.md).
 - Plot `last_load` per layer during training to watch the router balance.

@@ -20,6 +20,9 @@ class ModelConfig:
     n_experts: int = 0
     moe_top_k: int = 2
     moe_aux_weight: float = 0.01
+    moe_shared_experts: int = 0  # always-on experts added to the routed ones (DeepSeek-MoE: 1-2)
+    moe_balance: str = "aux"    # "aux" = Switch load-balancing loss, "bias" = aux-loss-free (DeepSeek-V3)
+    moe_bias_rate: float = 1e-3  # bias update step for moe_balance="bias" (DeepSeek-V3: 0.001)
     # Training stability (off by default). See llm/stability.py
     qk_norm: bool = False       # RMSNorm on each query/key head (OLMo 2, Gemma 3, Qwen3)
     attn_softcap: float = 0.0   # cap*tanh(score/cap) on attention scores, e.g. 50 (Gemma 2)
