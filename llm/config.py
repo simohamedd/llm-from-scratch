@@ -33,6 +33,10 @@ class ModelConfig:
     # Multi-head Latent Attention (0 = standard GQA). See llm/mla.py
     mla_kv_rank: int = 0        # size of the cached latent c_kv (DeepSeek-V3: 512)
     mla_rope_dim: int = 16      # decoupled RoPE key/query dims, shared key (DeepSeek-V3: 64)
+    # RoPE scaling for longer context ("" = off). See llm/rope_scaling.py
+    rope_scaling: str = ""      # "linear" (Position Interpolation), "ntk" (NTK-aware) or "yarn"
+    rope_factor: float = 1.0    # new length / original length, e.g. 4 (Qwen2.5 YaRN: 4, DeepSeek-V3: 40)
+    rope_original_context: int = 0  # length RoPE was trained at; 0 = context_length
 
     @property
     def head_dim(self) -> int:
@@ -42,6 +46,14 @@ class ModelConfig:
     def rope_dim(self) -> int:
         """Dimensions RoPE rotates: a full head, or only the decoupled part under MLA."""
         return self.mla_rope_dim if self.mla_kv_rank > 0 else self.head_dim
+
+    @property
+    def max_seq_len(self) -> int:
+        """Longest sequence the model should see: context_length, or original × factor when scaled."""
+        if not self.rope_scaling:
+            return self.context_length
+        original = self.rope_original_context or self.context_length
+        return max(self.context_length, int(original * self.rope_factor))
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -11,6 +11,7 @@ Components, each a small class you can read top to bottom:
   * optional QK-norm and logit soft-capping for training stability (see stability.py)
   * optional sliding-window attention + rolling KV cache (see sliding_window.py)
   * optional Multi-head Latent Attention — compressed KV cache (cfg.mla_kv_rank > 0, see mla.py)
+  * optional RoPE scaling (linear / NTK / YaRN) for longer context (cfg.rope_scaling, see rope_scaling.py)
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ import torch.nn.functional as F
 
 from .config import ModelConfig
 from .moe import MoEFFN, expert_hidden
+from .rope_scaling import rope_tables
 from .sliding_window import attention_mask, layer_window
 from .stability import softcap, softcapped_attention
 
@@ -180,9 +182,7 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.tok_emb.weight
-        cos, sin = rope_frequencies(cfg.rope_dim, cfg.context_length * 2, cfg.rope_theta)
-        self.register_buffer("rope_cos", cos, persistent=False)
-        self.register_buffer("rope_sin", sin, persistent=False)
+        self._build_rope()
         self.apply(self._init_weights)
         # GPT-2 trick: scale residual projections by 1/sqrt(2 * n_layers)
         for name, p in self.named_parameters():
@@ -195,6 +195,28 @@ class GPT(nn.Module):
             nn.init.normal_(m.weight, mean=0.0, std=0.02)
         elif isinstance(m, nn.Embedding):
             nn.init.normal_(m.weight, mean=0.0, std=0.02)
+
+    def _build_rope(self, max_len: int | None = None):
+        cfg = self.cfg
+        max_len = max(max_len or 0, cfg.context_length * 2, cfg.max_seq_len)
+        cos, sin = rope_tables(cfg.rope_dim, max_len, cfg.rope_theta, cfg.rope_scaling, cfg.rope_factor,
+                               cfg.rope_original_context or cfg.context_length)
+        device = self.rope_cos.device if hasattr(self, "rope_cos") else None
+        self.register_buffer("rope_cos", cos.to(device), persistent=False)
+        self.register_buffer("rope_sin", sin.to(device), persistent=False)
+
+    def set_rope_scaling(self, kind: str, factor: float = 1.0, original_len: int | None = None,
+                         max_len: int | None = None):
+        """Switch RoPE scaling on a (trained) model, e.g. set_rope_scaling("yarn", 4) for 4× context.
+
+        original_len defaults to the length RoPE was trained at (cfg.context_length). kind "" keeps
+        plain RoPE; max_len only enlarges the table (to test plain RoPE past its training length).
+        """
+        cfg = self.cfg
+        cfg.rope_original_context = original_len or cfg.rope_original_context or cfg.context_length
+        cfg.rope_scaling, cfg.rope_factor = kind, float(factor)
+        self._build_rope(max_len)
+        return self
 
     def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters())

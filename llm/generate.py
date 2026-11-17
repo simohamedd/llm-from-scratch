@@ -46,7 +46,7 @@ def stream(model: GPT, idx: torch.Tensor, max_new_tokens: int = 100, temperature
            stop_ids: set[int] | None = None) -> Iterator[int]:
     """Yield token ids one at a time (perfect for streaming APIs)."""
     model.eval()
-    ctx = model.cfg.context_length
+    ctx = model.cfg.max_seq_len   # context_length, or longer with RoPE scaling
     idx = idx[:, -ctx:]
     cache = model.new_cache()
     logits, _ = model(idx, cache=cache)                       # prefill

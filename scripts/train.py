@@ -37,6 +37,10 @@ def main():
     ap.add_argument("--global-every", type=int, default=0, help="every N-th layer keeps full attention (Gemma 2: 2)")
     ap.add_argument("--mla-kv-rank", type=int, default=0, help="Multi-head Latent Attention latent size, e.g. 32 (DeepSeek)")
     ap.add_argument("--mla-rope-dim", type=int, default=16, help="decoupled RoPE dims under MLA")
+    ap.add_argument("--rope-scaling", default="", choices=["", "linear", "ntk", "yarn"],
+                    help="RoPE scaling for longer context (see docs/advanced/rope-scaling.md)")
+    ap.add_argument("--rope-factor", type=float, default=1.0, help="context extension factor, e.g. 4")
+    ap.add_argument("--rope-original-context", type=int, default=0, help="length RoPE was trained at (0 = preset)")
     a = ap.parse_args()
 
     tok = BPETokenizer.load(a.tokenizer)
@@ -47,6 +51,7 @@ def main():
     cfg.qk_norm, cfg.attn_softcap, cfg.final_softcap = a.qk_norm, a.attn_softcap, a.final_softcap
     cfg.sliding_window, cfg.global_every = a.sliding_window, a.global_every
     cfg.mla_kv_rank, cfg.mla_rope_dim = a.mla_kv_rank, a.mla_rope_dim
+    cfg.rope_scaling, cfg.rope_factor, cfg.rope_original_context = a.rope_scaling, a.rope_factor, a.rope_original_context
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile,

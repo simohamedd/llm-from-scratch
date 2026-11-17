@@ -3,6 +3,19 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-17 — RoPE scaling: Position Interpolation, NTK-aware, YaRN
+- `llm/rope_scaling.py`: `scaled_inv_freq()` / `rope_tables()` — linear (PI) `θ/s`, NTK-aware `base·s^(d/(d-2))`,
+  and YaRN (per-pair ramp between keep and `θ/s` by turns-in-context, `beta_fast=32`, `beta_slow=1`, cos/sin × `0.1·ln s + 1`)
+- `ModelConfig(rope_scaling, rope_factor, rope_original_context)` — off by default; `cfg.max_seq_len` sizes the RoPE table
+  and the context `generate.py` keeps; `GPT.set_rope_scaling(kind, factor)` switches a trained model in place
+- `scripts/eval_long_context.py` (val loss per length × method); `scripts/train.py --rope-scaling yarn --rope-factor 4`
+- `tests/test_12_rope_scaling.py` (7 tests); full suite: 38 passed
+- Measured on Tiny Shakespeare (nano, vocab 512, 400 steps at context 128, CPU, one seed), zero-shot val loss at
+  256 / 512 / 1024 tokens: plain 2.927 / 3.075 / 3.364, linear 3.578 / 4.146 / 4.313, NTK 2.886 / 2.999 / 3.307,
+  YaRN 2.924 / 2.991 / 3.134 (2.887 at 128 for all). After 100 fine-tune steps at 512 (×4), val loss @512: plain 2.812,
+  linear 2.874, NTK 2.800, YaRN 2.797 — YaRN best zero-shot at 4–8×, differences after fine-tuning within noise;
+  doc: `docs/advanced/rope-scaling.md`
+
 ## 2026-11-16 — Shared experts + aux-loss-free MoE balancing
 - `llm/moe.py`: `MoEFFN(n_shared, balance, bias_rate)` — always-on shared experts added to the routed output, and
   DeepSeek-V3 bias routing: sigmoid scores, `top_k(s + b)` for selection only, mixing weights from raw scores,

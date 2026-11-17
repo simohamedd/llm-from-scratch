@@ -16,7 +16,7 @@ Rules for every item:
 - [x] Sliding-window attention + rolling KV cache (Mistral / Gemma) — `llm/sliding_window.py`
 - [x] Multi-head Latent Attention — compressed KV cache (DeepSeek-V2/V3) — `llm/mla.py`
 - [x] Shared expert + aux-loss-free load balancing for MoE (DeepSeek-V3) — `llm/moe.py`
-- [ ] YaRN / NTK RoPE scaling for longer context at inference
+- [x] YaRN / NTK RoPE scaling for longer context at inference — `llm/rope_scaling.py`
 - [ ] MLA query compression + precomputed absorbed weights for faster decoding (follow-up to `llm/mla.py`)
 
 ## Training
