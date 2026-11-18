@@ -3,6 +3,18 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-18 — MLA query compression + precomputed absorbed weights
+- `llm/mla.py`: low-rank queries `c_q = RMSNorm(W_dq x)`, `q = W_uq c_q` (`ModelConfig(mla_q_rank)`, off by default = full-rank `wq`);
+  `MLAttention.merge_weights()` multiplies out `W_qlat = W_ukᵀ·W_qnope` and `W_ov = W_o·W_uv` (non-persistent buffers,
+  dropped by `.train()`, refused on LoRA/int8 layers) so a decode step skips both per-head einsums; shared `_latent_attention()`
+- `GPT.merge_mla_weights()`; `scripts/train.py --mla-q-rank 64`
+- `tests/test_13_mla_decoding.py` (5 tests: naive = absorbed = merged incl. windows/soft-cap/q-compression, cached generation,
+  train() unmerges, LoRA refused, q-compressed model trains); full suite: 43 passed
+- Measured on Tiny Shakespeare (nano, vocab 512, 400 steps, CPU, one seed), val loss: GQA 2.858, MLA d_c 32 2.934,
+  + d_q 64 2.898, + d_q 32 2.918 (0.829M → 0.813M / 0.771M params) — query compression shows no measurable cost at this scale.
+  Greedy decode tok/s absorbed → merged (2 threads): B=1 565 → 701, 475 → 605, 562 → 672; B=16 4752 → 5393,
+  4241 → 5621, 5273 → 6106 — merging is 1.1–1.3× faster with identical outputs; doc: `docs/advanced/mla-decoding.md`
+
 ## 2026-11-17 — RoPE scaling: Position Interpolation, NTK-aware, YaRN
 - `llm/rope_scaling.py`: `scaled_inv_freq()` / `rope_tables()` — linear (PI) `θ/s`, NTK-aware `base·s^(d/(d-2))`,
   and YaRN (per-pair ramp between keep and `θ/s` by turns-in-context, `beta_fast=32`, `beta_slow=1`, cos/sin × `0.1·ln s + 1`)

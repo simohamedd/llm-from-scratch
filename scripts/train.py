@@ -37,6 +37,7 @@ def main():
     ap.add_argument("--global-every", type=int, default=0, help="every N-th layer keeps full attention (Gemma 2: 2)")
     ap.add_argument("--mla-kv-rank", type=int, default=0, help="Multi-head Latent Attention latent size, e.g. 32 (DeepSeek)")
     ap.add_argument("--mla-rope-dim", type=int, default=16, help="decoupled RoPE dims under MLA")
+    ap.add_argument("--mla-q-rank", type=int, default=0, help="low-rank query compression under MLA, e.g. 64 (0 = off)")
     ap.add_argument("--rope-scaling", default="", choices=["", "linear", "ntk", "yarn"],
                     help="RoPE scaling for longer context (see docs/advanced/rope-scaling.md)")
     ap.add_argument("--rope-factor", type=float, default=1.0, help="context extension factor, e.g. 4")
@@ -50,7 +51,7 @@ def main():
     cfg.moe_shared_experts, cfg.moe_balance, cfg.moe_bias_rate = a.shared_experts, a.moe_balance, a.moe_bias_rate
     cfg.qk_norm, cfg.attn_softcap, cfg.final_softcap = a.qk_norm, a.attn_softcap, a.final_softcap
     cfg.sliding_window, cfg.global_every = a.sliding_window, a.global_every
-    cfg.mla_kv_rank, cfg.mla_rope_dim = a.mla_kv_rank, a.mla_rope_dim
+    cfg.mla_kv_rank, cfg.mla_rope_dim, cfg.mla_q_rank = a.mla_kv_rank, a.mla_rope_dim, a.mla_q_rank
     cfg.rope_scaling, cfg.rope_factor, cfg.rope_original_context = a.rope_scaling, a.rope_factor, a.rope_original_context
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)

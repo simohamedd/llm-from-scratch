@@ -218,6 +218,18 @@ class GPT(nn.Module):
         self._build_rope(max_len)
         return self
 
+    def merge_mla_weights(self):
+        """Inference only: precompute MLA's absorbed matrices (W_uk·W_q, W_o·W_uv) in every layer.
+
+        Switches the model to eval mode; calling .train() drops the merged copies again.
+        """
+        from .mla import MLAttention
+        self.eval()
+        for b in self.blocks:
+            if isinstance(b.attn, MLAttention):
+                b.attn.merge_weights()
+        return self
+
     def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters())
 

@@ -26,6 +26,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | + | [QK-norm & soft-capping](docs/advanced/qk-norm-softcap.md) | RMSNorm on Q/K heads, tanh logit caps (training stability) | `llm/stability.py` | `develop` |
 | + | [Sliding-window attention](docs/advanced/sliding-window-attention.md) | banded local attention, local/global layers, rolling KV cache | `llm/sliding_window.py` | `develop` |
 | + | [Multi-head Latent Attention](docs/advanced/multi-head-latent-attention.md) | compressed latent KV cache, decoupled RoPE, weight absorption (DeepSeek) | `llm/mla.py` | `develop` |
+| + | [MLA query compression & merged weights](docs/advanced/mla-decoding.md) | low-rank queries, precomputed absorbed matrices for faster decoding (DeepSeek) | `llm/mla.py` | `develop` |
 | + | [RoPE scaling (PI / NTK / YaRN)](docs/advanced/rope-scaling.md) | run past the training length: interpolated frequencies, YaRN ramp + temperature | `llm/rope_scaling.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one

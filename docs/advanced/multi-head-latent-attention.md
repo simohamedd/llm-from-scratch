@@ -47,8 +47,8 @@ during decoding.
   eval mode, i.e. generation).
 - RoPE tables are built for `cfg.rope_dim` (= `mla_rope_dim` under MLA, the head size otherwise).
 - Works with sliding-window attention and attention soft-capping; `qk_norm` is not supported with
-  MLA. DeepSeek also compresses the *queries* with a second low rank (to save activations) — not
-  done here, see exercises.
+  MLA. Query compression and precomputed absorbed weights are in the follow-up
+  [MLA query compression & merged weights](mla-decoding.md).
 
 ## Run it
 ```bash

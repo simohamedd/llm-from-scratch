@@ -33,6 +33,7 @@ class ModelConfig:
     # Multi-head Latent Attention (0 = standard GQA). See llm/mla.py
     mla_kv_rank: int = 0        # size of the cached latent c_kv (DeepSeek-V3: 512)
     mla_rope_dim: int = 16      # decoupled RoPE key/query dims, shared key (DeepSeek-V3: 64)
+    mla_q_rank: int = 0         # low-rank query bottleneck c_q; 0 = full-rank wq (DeepSeek-V3: 1536)
     # RoPE scaling for longer context ("" = off). See llm/rope_scaling.py
     rope_scaling: str = ""      # "linear" (Position Interpolation), "ntk" (NTK-aware) or "yarn"
     rope_factor: float = 1.0    # new length / original length, e.g. 4 (Qwen2.5 YaRN: 4, DeepSeek-V3: 40)
