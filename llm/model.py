@@ -266,7 +266,12 @@ class GPT(nn.Module):
         losses = [b.ffn.aux_loss for b in self.blocks if isinstance(b.ffn, MoEFFN)]
         return torch.stack(losses).mean() if losses else torch.tensor(0.0)
 
-    def configure_optimizer(self, lr: float, weight_decay: float = 0.1, betas=(0.9, 0.95)):
+    def configure_optimizer(self, lr: float, weight_decay: float = 0.1, betas=(0.9, 0.95), optimizer: str = "adamw"):
+        if optimizer == "muon":  # Muon on hidden matrices, AdamW on the rest. See llm/muon.py
+            from .muon import Muon, muon_param_groups
+            return Muon(muon_param_groups(self, weight_decay), lr=lr, betas=betas)
+        if optimizer != "adamw":
+            raise ValueError(f"unknown optimizer {optimizer!r} (use 'adamw' or 'muon')")
         # no weight decay on norms / 1-D params (standard practice)
         decay = [p for p in self.parameters() if p.requires_grad and p.dim() >= 2]
         no_decay = [p for p in self.parameters() if p.requires_grad and p.dim() < 2]

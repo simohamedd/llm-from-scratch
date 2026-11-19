@@ -3,6 +3,18 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-19 — Muon optimizer for matrix weights
+- `llm/muon.py`: `newton_schulz()` (5-step quintic iteration, coefficients 3.4445 / −4.7750 / 2.0315, ≈ `U·Vᵀ` with matmuls only),
+  `Muon` optimiser (Nesterov momentum 0.95 → orthogonalise → `0.2·√max(m, n)` Moonlight RMS scaling, decoupled weight decay)
+  that runs Muon on `use_muon` groups and a built-in AdamW on the rest; `muon_param_groups()` keeps the tied embedding/head
+  and 1-D norms on AdamW
+- `GPT.configure_optimizer(..., optimizer="muon")`, `TrainConfig(optimizer)`, `scripts/train.py --optimizer muon` — default stays AdamW
+- `tests/test_14_muon.py` (7 tests: NS orthogonalises ill-conditioned matrices of 3 shapes, param split, AdamW branch = `torch.optim.AdamW`,
+  update RMS ≈ 0.2, Muon training reduces loss, unknown optimizer rejected); full suite: 50 passed
+- Measured on Tiny Shakespeare (nano, vocab 512, 400 steps, CPU, one seed), val loss: AdamW lr 1.5e-3 / 3e-3 / 6e-3 = 2.921 / 2.850 / 2.934;
+  Muon lr 3e-3 / 6e-3 / 1.2e-2 = 2.870 / 2.803 / 2.778 — same LR no gain, but Muon takes a 4× larger LR and its best beats AdamW's
+  best by 0.07; ~7 % slower per step on CPU; doc: `docs/advanced/muon.md`
+
 ## 2026-11-18 — MLA query compression + precomputed absorbed weights
 - `llm/mla.py`: low-rank queries `c_q = RMSNorm(W_dq x)`, `q = W_uq c_q` (`ModelConfig(mla_q_rank)`, off by default = full-rank `wq`);
   `MLAttention.merge_weights()` multiplies out `W_qlat = W_ukᵀ·W_qnope` and `W_ov = W_o·W_uv` (non-persistent buffers,

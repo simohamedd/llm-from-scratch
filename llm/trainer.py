@@ -35,6 +35,7 @@ class TrainConfig:
     eval_iters: int = 20
     out_dir: str = "checkpoints"
     compile: bool = False
+    optimizer: str = "adamw"     # or "muon" (Muon on hidden matrices, AdamW on the rest; llm/muon.py)
     seed: int = 1337
 
 
@@ -90,10 +91,10 @@ def train(model: GPT, dataset, tc: TrainConfig, device: str | None = None, log=p
     model.to(device).train()
     use_bf16 = device == "cuda" and torch.cuda.is_bf16_supported()
     ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_bf16 else torch.autocast("cpu", enabled=False)
-    opt = model.configure_optimizer(tc.lr, tc.weight_decay)
+    opt = model.configure_optimizer(tc.lr, tc.weight_decay, optimizer=tc.optimizer)
     run = torch.compile(model) if tc.compile and hasattr(torch, "compile") else model
     best_val, out = float("inf"), Path(tc.out_dir)
-    log(f"device={device} params={model.num_params()/1e6:.2f}M bf16={use_bf16}")
+    log(f"device={device} params={model.num_params()/1e6:.2f}M bf16={use_bf16} optimizer={tc.optimizer}")
     t0 = time.time()
     for step in range(tc.max_steps + 1):
         lr = lr_at(step, tc)

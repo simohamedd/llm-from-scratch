@@ -20,7 +20,7 @@ Rules for every item:
 - [x] MLA query compression + precomputed absorbed weights for faster decoding (follow-up to `llm/mla.py`)
 
 ## Training
-- [ ] Muon optimizer option for matrix weights
+- [x] Muon optimizer option for matrix weights — `llm/muon.py`
 - [ ] Warmup-Stable-Decay (WSD) learning-rate schedule
 - [ ] Gradient checkpointing flag to save memory
 - [ ] Multi-GPU training with DistributedDataParallel (`torchrun`)
