@@ -29,6 +29,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | + | [MLA query compression & merged weights](docs/advanced/mla-decoding.md) | low-rank queries, precomputed absorbed matrices for faster decoding (DeepSeek) | `llm/mla.py` | `develop` |
 | + | [RoPE scaling (PI / NTK / YaRN)](docs/advanced/rope-scaling.md) | run past the training length: interpolated frequencies, YaRN ramp + temperature | `llm/rope_scaling.py` | `develop` |
 | + | [Muon optimizer](docs/advanced/muon.md) | momentum + Newton-Schulz orthogonalisation for matrix weights, AdamW for the rest (Kimi K2, Moonlight) | `llm/muon.py` | `develop` |
+| + | [Warmup-Stable-Decay schedule](docs/advanced/wsd-schedule.md) | constant LR plateau + short final decay (linear / cosine / 1-sqrt), budget-free training (MiniCPM, SmolLM2) | `llm/schedules.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.

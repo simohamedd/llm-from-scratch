@@ -3,6 +3,19 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-20 — Warmup-Stable-Decay (WSD) learning-rate schedule
+- `llm/schedules.py`: `cosine_lr()` (the existing warm-up + cosine, moved out of the trainer), `wsd_lr()` (linear warm-up,
+  constant peak LR, decay over the last `decay_frac` of steps to `lr·min_lr_ratio`) and `decay_factor()` with `linear`,
+  `cosine` and `1-sqrt` shapes
+- `TrainConfig(schedule, decay_frac, decay_shape)` — default stays `"cosine"` (bit-for-bit the old formula, tested);
+  `scripts/train.py --schedule wsd --decay-frac 0.2 --decay-shape sqrt --min-lr-ratio 0.1`
+- `tests/test_15_wsd_schedule.py` (7 tests: default unchanged, warm-up / flat plateau / monotone decay to min for 3 shapes,
+  shape values, edge cases + bad args rejected, WSD training reduces loss and logs the plateau LR); full suite: 57 passed
+- Measured on Tiny Shakespeare (nano, vocab 512, 400 steps, 40 warm-up, AdamW 3e-3, CPU), val loss @400: cosine 2.852
+  (min 0 → 2.881), WSD 1-sqrt 20 % 2.804 (min 0 → 2.813), linear 20 % 2.808, 1-sqrt 10 % 2.817; second seed cosine 2.832 vs
+  WSD 2.790 — WSD ends ~0.045 lower on both seeds while trailing by ~0.07 before its decay (step 300); same wall time;
+  doc: `docs/advanced/wsd-schedule.md`
+
 ## 2026-11-19 — Muon optimizer for matrix weights
 - `llm/muon.py`: `newton_schulz()` (5-step quintic iteration, coefficients 3.4445 / −4.7750 / 2.0315, ≈ `U·Vᵀ` with matmuls only),
   `Muon` optimiser (Nesterov momentum 0.95 → orthogonalise → `0.2·√max(m, n)` Moonlight RMS scaling, decoupled weight decay)

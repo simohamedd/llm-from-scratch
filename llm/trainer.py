@@ -2,7 +2,7 @@
 
 Techniques used by real LLM training runs, in miniature:
   * AdamW with decoupled weight decay
-  * linear warm-up + cosine learning-rate decay
+  * linear warm-up + cosine learning-rate decay (or Warmup-Stable-Decay, llm/schedules.py)
   * gradient accumulation (simulate big batches on small hardware)
   * gradient clipping
   * mixed precision (bf16) on GPU, torch.compile when available
@@ -19,6 +19,7 @@ import torch
 
 from .config import ModelConfig
 from .model import GPT
+from .schedules import SCHEDULES, cosine_lr, wsd_lr
 
 
 @dataclass
@@ -37,6 +38,9 @@ class TrainConfig:
     compile: bool = False
     optimizer: str = "adamw"     # or "muon" (Muon on hidden matrices, AdamW on the rest; llm/muon.py)
     seed: int = 1337
+    schedule: str = "cosine"     # or "wsd" (warm-up, constant, short final decay; llm/schedules.py)
+    decay_frac: float = 0.2      # wsd: fraction of max_steps spent decaying
+    decay_shape: str = "sqrt"    # wsd: "linear" | "cosine" | "sqrt" (1-sqrt)
 
 
 def pick_device() -> str:
@@ -48,11 +52,11 @@ def pick_device() -> str:
 
 
 def lr_at(step: int, tc: TrainConfig) -> float:
-    if step < tc.warmup_steps:
-        return tc.lr * (step + 1) / tc.warmup_steps
-    progress = (step - tc.warmup_steps) / max(1, tc.max_steps - tc.warmup_steps)
-    min_lr = tc.lr * tc.min_lr_ratio
-    return min_lr + 0.5 * (tc.lr - min_lr) * (1 + math.cos(math.pi * min(progress, 1.0)))
+    if tc.schedule == "cosine":
+        return cosine_lr(step, tc.lr, tc.warmup_steps, tc.max_steps, tc.min_lr_ratio)
+    if tc.schedule == "wsd":
+        return wsd_lr(step, tc.lr, tc.warmup_steps, tc.max_steps, tc.decay_frac, tc.min_lr_ratio, tc.decay_shape)
+    raise ValueError(f"unknown schedule {tc.schedule!r}; choose from {SCHEDULES}")
 
 
 @torch.no_grad()
@@ -94,7 +98,7 @@ def train(model: GPT, dataset, tc: TrainConfig, device: str | None = None, log=p
     opt = model.configure_optimizer(tc.lr, tc.weight_decay, optimizer=tc.optimizer)
     run = torch.compile(model) if tc.compile and hasattr(torch, "compile") else model
     best_val, out = float("inf"), Path(tc.out_dir)
-    log(f"device={device} params={model.num_params()/1e6:.2f}M bf16={use_bf16} optimizer={tc.optimizer}")
+    log(f"device={device} params={model.num_params()/1e6:.2f}M bf16={use_bf16} optimizer={tc.optimizer} schedule={tc.schedule}")
     t0 = time.time()
     for step in range(tc.max_steps + 1):
         lr = lr_at(step, tc)

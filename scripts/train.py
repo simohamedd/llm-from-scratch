@@ -26,6 +26,11 @@ def main():
     ap.add_argument("--compile", action="store_true")
     ap.add_argument("--optimizer", default="adamw", choices=["adamw", "muon"],
                     help="muon = Muon on hidden matrices + AdamW on the rest (see docs/advanced/muon.md)")
+    ap.add_argument("--schedule", default="cosine", choices=["cosine", "wsd"],
+                    help="wsd = Warmup-Stable-Decay (see docs/advanced/wsd-schedule.md)")
+    ap.add_argument("--decay-frac", type=float, default=0.2, help="wsd: fraction of steps spent decaying")
+    ap.add_argument("--decay-shape", default="sqrt", choices=["linear", "cosine", "sqrt"], help="wsd decay curve")
+    ap.add_argument("--min-lr-ratio", type=float, default=0.1, help="final LR as a fraction of --lr")
     ap.add_argument("--experts", type=int, default=0, help="Mixture of Experts: number of experts (0 = dense)")
     ap.add_argument("--top-k", type=int, default=2, help="experts used per token")
     ap.add_argument("--shared-experts", type=int, default=0, help="always-on shared experts (DeepSeek-MoE)")
@@ -58,6 +63,7 @@ def main():
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile, optimizer=a.optimizer,
+                     schedule=a.schedule, decay_frac=a.decay_frac, decay_shape=a.decay_shape, min_lr_ratio=a.min_lr_ratio,
                      eval_every=max(50, a.steps // 10), warmup_steps=min(100, a.steps // 10))
     model = train(model, ds, tc)
     try:  # sampling is built in chapter 4
