@@ -40,6 +40,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .checkpointing import is_recomputing
+
 
 class Expert(nn.Module):
     """One SwiGLU expert — the same block as the dense FFN, just smaller."""
@@ -75,7 +77,9 @@ class MoEFFN(nn.Module):
         logits = self.router(flat).float()
         if self.balance == "bias":
             scores = torch.sigmoid(logits)                                   # (N, E)
-            idx = (scores + self.expert_bias).topk(self.top_k, dim=-1).indices
+            # gradient checkpointing re-runs this forward after update_bias(): route with the old bias
+            bias = self._routed_bias if is_recomputing() else self.expert_bias
+            idx = (scores + bias).topk(self.top_k, dim=-1).indices
             weights = scores.gather(-1, idx)                                 # bias NOT in the mix
             probs = scores / scores.sum(-1, keepdim=True)
         else:
@@ -108,7 +112,8 @@ class MoEFFN(nn.Module):
         self.last_load = (frac_tokens / self.top_k).detach()
         if self.balance == "bias":
             self.aux_loss = torch.zeros((), device=x.device)             # no loss term at all
-            if self.training:
+            if self.training and not is_recomputing():   # gradient checkpointing re-runs forward
+                self._routed_bias = self.expert_bias.clone()
                 self.update_bias(self.last_load)
         else:  # Switch-Transformer load-balancing loss
             frac_probs = probs.mean(0)                                   # P_e (sums to 1)

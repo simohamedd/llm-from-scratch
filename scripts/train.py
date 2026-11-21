@@ -49,6 +49,9 @@ def main():
                     help="RoPE scaling for longer context (see docs/advanced/rope-scaling.md)")
     ap.add_argument("--rope-factor", type=float, default=1.0, help="context extension factor, e.g. 4")
     ap.add_argument("--rope-original-context", type=int, default=0, help="length RoPE was trained at (0 = preset)")
+    ap.add_argument("--grad-checkpoint", action="store_true",
+                    help="recompute activations in backward to save memory (see docs/advanced/gradient-checkpointing.md)")
+    ap.add_argument("--checkpoint-every", type=int, default=1, help="checkpoint every N-th block (with --grad-checkpoint)")
     a = ap.parse_args()
 
     tok = BPETokenizer.load(a.tokenizer)
@@ -60,6 +63,7 @@ def main():
     cfg.sliding_window, cfg.global_every = a.sliding_window, a.global_every
     cfg.mla_kv_rank, cfg.mla_rope_dim, cfg.mla_q_rank = a.mla_kv_rank, a.mla_rope_dim, a.mla_q_rank
     cfg.rope_scaling, cfg.rope_factor, cfg.rope_original_context = a.rope_scaling, a.rope_factor, a.rope_original_context
+    cfg.grad_checkpoint, cfg.checkpoint_every = a.grad_checkpoint, a.checkpoint_every
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile, optimizer=a.optimizer,

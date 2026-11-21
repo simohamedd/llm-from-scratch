@@ -38,6 +38,9 @@ class ModelConfig:
     rope_scaling: str = ""      # "linear" (Position Interpolation), "ntk" (NTK-aware) or "yarn"
     rope_factor: float = 1.0    # new length / original length, e.g. 4 (Qwen2.5 YaRN: 4, DeepSeek-V3: 40)
     rope_original_context: int = 0  # length RoPE was trained at; 0 = context_length
+    # Gradient checkpointing (off by default): recompute block activations in backward. See llm/checkpointing.py
+    grad_checkpoint: bool = False   # trade ~30 % more compute for much less activation memory
+    checkpoint_every: int = 1       # checkpoint every N-th block (1 = all, 2 = half of them, ...)
 
     @property
     def head_dim(self) -> int:

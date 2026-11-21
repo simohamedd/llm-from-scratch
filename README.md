@@ -30,6 +30,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | + | [RoPE scaling (PI / NTK / YaRN)](docs/advanced/rope-scaling.md) | run past the training length: interpolated frequencies, YaRN ramp + temperature | `llm/rope_scaling.py` | `develop` |
 | + | [Muon optimizer](docs/advanced/muon.md) | momentum + Newton-Schulz orthogonalisation for matrix weights, AdamW for the rest (Kimi K2, Moonlight) | `llm/muon.py` | `develop` |
 | + | [Warmup-Stable-Decay schedule](docs/advanced/wsd-schedule.md) | constant LR plateau + short final decay (linear / cosine / 1-sqrt), budget-free training (MiniCPM, SmolLM2) | `llm/schedules.py` | `develop` |
+| + | [Gradient checkpointing](docs/advanced/gradient-checkpointing.md) | drop block activations in forward, recompute them in backward via saved-tensor hooks (2–2.6× less peak memory, identical gradients) | `llm/checkpointing.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.

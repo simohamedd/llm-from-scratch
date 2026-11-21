@@ -12,6 +12,7 @@ Components, each a small class you can read top to bottom:
   * optional sliding-window attention + rolling KV cache (see sliding_window.py)
   * optional Multi-head Latent Attention — compressed KV cache (cfg.mla_kv_rank > 0, see mla.py)
   * optional RoPE scaling (linear / NTK / YaRN) for longer context (cfg.rope_scaling, see rope_scaling.py)
+  * optional gradient checkpointing — recompute activations in backward (cfg.grad_checkpoint, see checkpointing.py)
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .checkpointing import checkpoint, should_checkpoint
 from .config import ModelConfig
 from .moe import MoEFFN, expert_hidden
 from .rope_scaling import rope_tables
@@ -240,8 +242,11 @@ class GPT(nn.Module):
         assert start + T <= self.rope_cos.shape[0], "sequence longer than RoPE table"
         cos, sin = self.rope_cos[start:start + T], self.rope_sin[start:start + T]
         x = self.tok_emb(idx)
-        for block in self.blocks:
-            x = block(x, cos, sin, cache)
+        for i, block in enumerate(self.blocks):
+            if should_checkpoint(self, i, cache):   # drop activations now, recompute them in backward
+                x = checkpoint(block, x, cos, sin)
+            else:
+                x = block(x, cos, sin, cache)
         x = self.norm(x)
         if targets is None:
             if all_logits:

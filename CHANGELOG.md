@@ -3,6 +3,22 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-21 — Gradient checkpointing (activation recomputation)
+- `llm/checkpointing.py`: from-scratch `checkpoint(fn, *args)` built on `torch.autograd.graph.saved_tensors_hooks` — forward
+  swaps every saved tensor for a ticket, backward re-runs the block once (RNG state and autocast restored) and hands the
+  recomputed tensors back in order (non-reentrant design: works with frozen inputs/LoRA, side outputs and `autograd.grad`);
+  `is_recomputing()`, `should_checkpoint()`, `count_saved_bytes()` (bytes autograd keeps for backward)
+- `ModelConfig(grad_checkpoint, checkpoint_every)` — off by default; only active in training with grad on and no KV cache;
+  `scripts/train.py --grad-checkpoint --checkpoint-every 2`. MoE bias balancing skips its update during recompute and
+  routes with the bias the batch originally used
+- `tests/test_16_grad_checkpoint.py` (11 tests: gradients = plain backward for dense / dropout / MoE aux / MoE bias + shared /
+  MLA / sliding-window + QK-norm + soft-cap, MoE bias updated once, matches `torch.utils.checkpoint`, LoRA with frozen
+  embedding gets gradients, less saved memory + eval untouched, training reduces loss); full suite: 68 passed
+- Measured (CPU, 2 threads): nano 400 steps on Tiny Shakespeare, same init — val loss 2.8363 for off / every-2nd / every block
+  (curves identical to 4 decimals), wall time 88.8 s / 103.2 s (+16 %) / 113.3 s (+28 %). Peak extra RSS for one fwd+bwd,
+  micro (T=256): B=32 1914 → 1250 → 726 MiB, B=64 3858 → 2440 → 1751 MiB (2.2–2.6× less); saved activations micro B=32
+  1115.5 → 578.1 → 40.7 MiB. Not needed at nano scale; doc: `docs/advanced/gradient-checkpointing.md`
+
 ## 2026-11-20 — Warmup-Stable-Decay (WSD) learning-rate schedule
 - `llm/schedules.py`: `cosine_lr()` (the existing warm-up + cosine, moved out of the trainer), `wsd_lr()` (linear warm-up,
   constant peak LR, decay over the last `decay_frac` of steps to `lr·min_lr_ratio`) and `decay_factor()` with `linear`,
