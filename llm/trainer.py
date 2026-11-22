@@ -7,6 +7,7 @@ Techniques used by real LLM training runs, in miniature:
   * gradient clipping
   * mixed precision (bf16) on GPU, torch.compile when available
   * periodic validation + checkpointing
+  * data-parallel training over several processes / GPUs with `torchrun` (llm/distributed.py)
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from pathlib import Path
 import torch
 
 from .config import ModelConfig
+from .distributed import GradReducer, all_reduce_mean, broadcast_parameters, current_env, sync_buffers
 from .model import GPT
 from .schedules import SCHEDULES, cosine_lr, wsd_lr
 
@@ -70,7 +72,7 @@ def estimate_loss(model, dataset, tc: TrainConfig, device, ctx) -> dict[str, flo
             with ctx:
                 _, loss = model(x, y)
             losses[k] = loss.item()
-        out[split] = losses.mean().item()
+        out[split] = all_reduce_mean(losses.mean()).item()   # average over ranks (no-op single-process)
     model.train()
     return out
 
@@ -90,15 +92,29 @@ def load_checkpoint(path: str | Path, device: str = "cpu") -> GPT:
 
 
 def train(model: GPT, dataset, tc: TrainConfig, device: str | None = None, log=print) -> GPT:
-    torch.manual_seed(tc.seed)
+    """Train `model`. Inside an initialised process group (torchrun), runs data-parallel:
+    rank 0's weights are broadcast, each rank samples its own batches (seed + rank), gradients are
+    averaged with a bucketed all-reduce before clipping, and only rank 0 logs / saves checkpoints.
+    `tc.batch_size` is then per rank: global batch = batch_size * grad_accum * world_size."""
+    env = current_env()
+    torch.manual_seed(tc.seed + env.rank)        # rank 0 = the single-process seed
     device = device or pick_device()
     model.to(device).train()
+    reducer = None
+    if env.enabled:
+        broadcast_parameters(model)
+        reducer = GradReducer(model)
+    if not env.is_main:
+        log = lambda *a, **k: None  # noqa: E731
     use_bf16 = device == "cuda" and torch.cuda.is_bf16_supported()
     ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_bf16 else torch.autocast("cpu", enabled=False)
     opt = model.configure_optimizer(tc.lr, tc.weight_decay, optimizer=tc.optimizer)
     run = torch.compile(model) if tc.compile and hasattr(torch, "compile") else model
     best_val, out = float("inf"), Path(tc.out_dir)
     log(f"device={device} params={model.num_params()/1e6:.2f}M bf16={use_bf16} optimizer={tc.optimizer} schedule={tc.schedule}")
+    if env.enabled:
+        log(f"data-parallel: world_size={env.world_size} backend={env.backend} "
+            f"global batch={tc.batch_size * tc.grad_accum * env.world_size}")
     t0 = time.time()
     for step in range(tc.max_steps + 1):
         lr = lr_at(step, tc)
@@ -110,7 +126,8 @@ def train(model: GPT, dataset, tc: TrainConfig, device: str | None = None, log=p
                 f"ppl {math.exp(losses['val']):.1f} | lr {lr:.2e} | {time.time()-t0:.0f}s")
             if losses["val"] < best_val:
                 best_val = losses["val"]
-                save_checkpoint(out / "best.pt", model, model.cfg, tc, step, best_val)
+                if env.is_main:
+                    save_checkpoint(out / "best.pt", model, model.cfg, tc, step, best_val)
         if step == tc.max_steps:
             break
         opt.zero_grad(set_to_none=True)
@@ -119,7 +136,12 @@ def train(model: GPT, dataset, tc: TrainConfig, device: str | None = None, log=p
             with ctx:
                 _, loss = run(x, y)
             (loss / tc.grad_accum).backward()
+        if reducer is not None:
+            reducer.all_reduce()                 # once per step, after the last micro-batch
         torch.nn.utils.clip_grad_norm_(model.parameters(), tc.grad_clip)
         opt.step()
-    save_checkpoint(out / "last.pt", model, model.cfg, tc, tc.max_steps, best_val)
+        if env.enabled:
+            sync_buffers(model)                  # e.g. MoE expert_bias, updated from local loads
+    if env.is_main:
+        save_checkpoint(out / "last.pt", model, model.cfg, tc, tc.max_steps, best_val)
     return model

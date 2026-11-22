@@ -3,6 +3,24 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-22 — Multi-GPU data-parallel training (`torchrun`)
+- `llm/distributed.py`: `setup_distributed()` (reads torchrun's `RANK` / `LOCAL_RANK` / `WORLD_SIZE`, NCCL on GPU, gloo on
+  CPU, a no-op single-process `DistEnv` otherwise), `broadcast_parameters()`, from-scratch `GradReducer` (flattens gradients
+  into ~25 MB buckets in reverse parameter order, one `all_reduce` per bucket, ÷ world size), `all_reduce_mean()`,
+  `sync_buffers()` (averages persistent float buffers such as MoE `expert_bias`)
+- `train()` goes data-parallel only inside an initialised process group: broadcast rank 0's weights, seed `seed + rank` for
+  different batches, reduce once per optimizer step after the last micro-batch (≈ DDP `no_sync`), average eval losses
+  over ranks, rank 0 alone logs and saves. Single-process behaviour unchanged (rank 0 seed = old seed).
+  `torchrun --nproc_per_node 2 scripts/train.py --batch-size 16` (`--backend gloo|nccl`); `--batch-size` is per rank
+- `tests/test_17_distributed.py` (8 tests, 2 gloo processes: reduced grads = single-process full-batch grads for dense /
+  tiny buckets / MLA, = `torch.nn.parallel.DistributedDataParallel`, `train()` keeps replicas bit-identical incl. MoE bias
+  balancing + only rank 0 logs, buffer sync + mean, single-process no-op); full suite: 76 passed
+- Measured (nano, vocab 512, 400 steps, 2-core CPU), val loss @400: single 1×32 2.851 / 2.849 (two seeds, 101 s / 99 s),
+  DDP 2×16 2.801 (99 s), DDP 2×32 (global 64) 2.729 (195 s) — same global batch tracks the single run; no speed-up on
+  2 CPU cores because one process already uses both through intra-op threads (the gain needs one device per rank).
+  Caveat documented: MoE aux-loss statistics are per rank, so that gradient is not the global-batch one;
+  doc: `docs/advanced/distributed-training.md`
+
 ## 2026-11-21 — Gradient checkpointing (activation recomputation)
 - `llm/checkpointing.py`: from-scratch `checkpoint(fn, *args)` built on `torch.autograd.graph.saved_tensors_hooks` — forward
   swaps every saved tensor for a ticket, backward re-runs the block once (RNG state and autocast restored) and hands the

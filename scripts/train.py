@@ -2,6 +2,7 @@
 
     python scripts/train.py --preset nano --steps 1500        # CPU, a few minutes
     python scripts/train.py --preset micro --steps 5000       # GPU / Colab
+    torchrun --nproc_per_node 2 scripts/train.py --preset nano --batch-size 16   # data-parallel
 """
 import argparse
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from llm.config import PRESETS  # noqa: E402
 from llm.data import TokenDataset  # noqa: E402
+from llm.distributed import cleanup_distributed, setup_distributed  # noqa: E402
 from llm.model import GPT  # noqa: E402
 from llm.tokenizer import BPETokenizer  # noqa: E402
 from llm.trainer import TrainConfig, train  # noqa: E402
@@ -52,7 +54,10 @@ def main():
     ap.add_argument("--grad-checkpoint", action="store_true",
                     help="recompute activations in backward to save memory (see docs/advanced/gradient-checkpointing.md)")
     ap.add_argument("--checkpoint-every", type=int, default=1, help="checkpoint every N-th block (with --grad-checkpoint)")
+    ap.add_argument("--backend", default=None, choices=[None, "gloo", "nccl"],
+                    help="torchrun process-group backend (default: nccl on GPU, gloo on CPU)")
     a = ap.parse_args()
+    env = setup_distributed(a.backend)   # no-op unless launched with torchrun (WORLD_SIZE > 1)
 
     tok = BPETokenizer.load(a.tokenizer)
     cfg = PRESETS[a.preset]
@@ -69,7 +74,11 @@ def main():
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile, optimizer=a.optimizer,
                      schedule=a.schedule, decay_frac=a.decay_frac, decay_shape=a.decay_shape, min_lr_ratio=a.min_lr_ratio,
                      eval_every=max(50, a.steps // 10), warmup_steps=min(100, a.steps // 10))
-    model = train(model, ds, tc)
+    model = train(model, ds, tc, device=env.device if env.enabled else None)
+    if env.enabled:
+        cleanup_distributed()
+    if not env.is_main:
+        return
     try:  # sampling is built in chapter 4
         from llm.generate import generate
     except ImportError:

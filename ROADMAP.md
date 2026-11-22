@@ -23,7 +23,7 @@ Rules for every item:
 - [x] Muon optimizer option for matrix weights — `llm/muon.py`
 - [x] Warmup-Stable-Decay (WSD) learning-rate schedule — `llm/schedules.py`
 - [x] Gradient checkpointing flag to save memory — `llm/checkpointing.py`
-- [ ] Multi-GPU training with DistributedDataParallel (`torchrun`)
+- [x] Multi-GPU training with DistributedDataParallel (`torchrun`) — `llm/distributed.py`
 - [ ] Multi-token prediction auxiliary head (DeepSeek-V3)
 
 ## Inference
