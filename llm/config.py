@@ -41,6 +41,9 @@ class ModelConfig:
     # Gradient checkpointing (off by default): recompute block activations in backward. See llm/checkpointing.py
     grad_checkpoint: bool = False   # trade ~30 % more compute for much less activation memory
     checkpoint_every: int = 1       # checkpoint every N-th block (1 = all, 2 = half of them, ...)
+    # Multi-token prediction auxiliary heads (0 = off). See llm/mtp.py
+    mtp_depth: int = 0          # extra future tokens predicted per position (DeepSeek-V3: 1)
+    mtp_weight: float = 0.3     # λ: loss = main + λ · mean MTP loss (DeepSeek-V3: 0.3, later 0.1)
 
     @property
     def head_dim(self) -> int:

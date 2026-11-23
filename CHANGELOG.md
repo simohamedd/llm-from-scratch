@@ -3,6 +3,22 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-23 — Multi-token prediction (MTP) auxiliary heads (DeepSeek-V3)
+- `llm/mtp.py`: `MTPModule` (RMSNorm(h) ‖ RMSNorm(Emb(t_{i+k})) → Linear 2d→d → one `Block` → RMSNorm) and
+  `MultiTokenPrediction` (D sequential depths sharing the main embedding + output head; depth k runs on length T − k and
+  predicts t_{i+k+1}, `ignore_index=-100` respected, depths longer than the sequence skipped)
+- `ModelConfig(mtp_depth, mtp_weight)` — off by default; loss = main + λ · mean MTP loss, **training only** (eval loss,
+  `generate()` and checkpoints-without-MTP unchanged). Heads are built after the trunk is initialised, so the same seed gives
+  an identical trunk with or without MTP. MoE aux losses of MTP blocks included; `num_params(include_mtp=False)`,
+  `model.last_mtp_losses`, ` | mtp …` in the train log; `scripts/train.py --mtp-depth 1 --mtp-weight 0.3`
+- `tests/test_18_mtp.py` (10 tests: default off + shared weights, identical trunk / eval output, loss = main + λ·mean,
+  depth-k targets re-derived by hand, ignore-index + short sequences, gradients reach trunk + heads for dense / MoE / MLA /
+  grad-checkpoint, train → generate → reload); full suite: 86 passed
+- Measured (nano, vocab 512, 400 steps, CPU 2 threads), main-head val loss @400, baseline → MTP D=1 λ=0.3: seed 1337
+  2.854 → 2.823, seed 7 2.832 → 2.847, seed 42 2.835 → 2.844 (means 2.840 vs 2.838 — no measurable gain at this scale, as
+  the literature predicts for small models); D=2 2.834, λ=0.1 2.840 (seed 1337). Cost +29 % wall time per depth
+  (116 → 150 → 182 s). Doc: `docs/advanced/multi-token-prediction.md`; follow-up added to ROADMAP (MTP as speculative draft)
+
 ## 2026-11-22 — Multi-GPU data-parallel training (`torchrun`)
 - `llm/distributed.py`: `setup_distributed()` (reads torchrun's `RANK` / `LOCAL_RANK` / `WORLD_SIZE`, NCCL on GPU, gloo on
   CPU, a no-op single-process `DistEnv` otherwise), `broadcast_parameters()`, from-scratch `GradReducer` (flattens gradients

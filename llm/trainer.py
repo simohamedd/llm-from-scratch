@@ -61,6 +61,13 @@ def lr_at(step: int, tc: TrainConfig) -> float:
     raise ValueError(f"unknown schedule {tc.schedule!r}; choose from {SCHEDULES}")
 
 
+def mtp_log(model) -> str:
+    """' | mtp 3.12 3.40' — per-depth multi-token-prediction train losses of the last step (llm/mtp.py)."""
+    raw = getattr(model, "_orig_mod", model)
+    losses = getattr(raw, "last_mtp_losses", [])
+    return " | mtp " + " ".join(f"{m.item():.3f}" for m in losses) if losses else ""
+
+
 @torch.no_grad()
 def estimate_loss(model, dataset, tc: TrainConfig, device, ctx) -> dict[str, float]:
     model.eval()
@@ -123,7 +130,8 @@ def train(model: GPT, dataset, tc: TrainConfig, device: str | None = None, log=p
         if step % tc.eval_every == 0 or step == tc.max_steps:
             losses = estimate_loss(run, dataset, tc, device, ctx)
             log(f"step {step:5d} | train {losses['train']:.4f} | val {losses['val']:.4f} | "
-                f"ppl {math.exp(losses['val']):.1f} | lr {lr:.2e} | {time.time()-t0:.0f}s")
+                f"ppl {math.exp(losses['val']):.1f} | lr {lr:.2e} | {time.time()-t0:.0f}s"
+                + mtp_log(model))
             if losses["val"] < best_val:
                 best_val = losses["val"]
                 if env.is_main:

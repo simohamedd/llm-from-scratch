@@ -54,6 +54,9 @@ def main():
     ap.add_argument("--grad-checkpoint", action="store_true",
                     help="recompute activations in backward to save memory (see docs/advanced/gradient-checkpointing.md)")
     ap.add_argument("--checkpoint-every", type=int, default=1, help="checkpoint every N-th block (with --grad-checkpoint)")
+    ap.add_argument("--mtp-depth", type=int, default=0,
+                    help="multi-token prediction: extra future tokens per position, e.g. 1 (see docs/advanced/multi-token-prediction.md)")
+    ap.add_argument("--mtp-weight", type=float, default=0.3, help="weight λ of the MTP loss")
     ap.add_argument("--backend", default=None, choices=[None, "gloo", "nccl"],
                     help="torchrun process-group backend (default: nccl on GPU, gloo on CPU)")
     a = ap.parse_args()
@@ -69,6 +72,7 @@ def main():
     cfg.mla_kv_rank, cfg.mla_rope_dim, cfg.mla_q_rank = a.mla_kv_rank, a.mla_rope_dim, a.mla_q_rank
     cfg.rope_scaling, cfg.rope_factor, cfg.rope_original_context = a.rope_scaling, a.rope_factor, a.rope_original_context
     cfg.grad_checkpoint, cfg.checkpoint_every = a.grad_checkpoint, a.checkpoint_every
+    cfg.mtp_depth, cfg.mtp_weight = a.mtp_depth, a.mtp_weight
     ds = TokenDataset.from_text_file(a.data, tok, cfg.context_length)
     model = GPT(cfg)
     tc = TrainConfig(max_steps=a.steps, batch_size=a.batch_size, lr=a.lr, compile=a.compile, optimizer=a.optimizer,

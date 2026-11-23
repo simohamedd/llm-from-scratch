@@ -13,6 +13,7 @@ Components, each a small class you can read top to bottom:
   * optional Multi-head Latent Attention — compressed KV cache (cfg.mla_kv_rank > 0, see mla.py)
   * optional RoPE scaling (linear / NTK / YaRN) for longer context (cfg.rope_scaling, see rope_scaling.py)
   * optional gradient checkpointing — recompute activations in backward (cfg.grad_checkpoint, see checkpointing.py)
+  * optional multi-token prediction heads — extra training loss on tokens 2..D+1 ahead (cfg.mtp_depth, see mtp.py)
 """
 from __future__ import annotations
 
@@ -190,6 +191,17 @@ class GPT(nn.Module):
         for name, p in self.named_parameters():
             if name.endswith(("wo.weight", "w_down.weight")):
                 nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * cfg.n_layers))
+        # multi-token prediction heads, built *after* the trunk is initialised so the trunk's
+        # initial weights are identical with and without MTP (a fair comparison)
+        self.mtp = None
+        self.last_mtp_losses: list[torch.Tensor] = []   # per-depth MTP losses (detached) of the last training forward
+        if cfg.mtp_depth > 0:
+            from .mtp import MultiTokenPrediction   # imported here: mtp.py builds on this module
+            self.mtp = MultiTokenPrediction(cfg)
+            self.mtp.apply(self._init_weights)
+            for name, p in self.mtp.named_parameters():
+                if name.endswith(("wo.weight", "w_down.weight")):
+                    nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * cfg.n_layers))
 
     @staticmethod
     def _init_weights(m):
@@ -232,8 +244,11 @@ class GPT(nn.Module):
                 b.attn.merge_weights()
         return self
 
-    def num_params(self) -> int:
-        return sum(p.numel() for p in self.parameters())
+    def num_params(self, include_mtp: bool = True) -> int:
+        n = sum(p.numel() for p in self.parameters())
+        if not include_mtp and self.mtp is not None:
+            n -= sum(p.numel() for p in self.mtp.parameters())   # embedding / head are shared, not counted twice
+        return n
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None,
                 cache: KVCache | None = None, all_logits: bool = False):
@@ -247,6 +262,7 @@ class GPT(nn.Module):
                 x = checkpoint(block, x, cos, sin)
             else:
                 x = block(x, cos, sin, cache)
+        h = x                                    # trunk output before the final norm (input to MTP)
         x = self.norm(x)
         if targets is None:
             if all_logits:
@@ -254,6 +270,11 @@ class GPT(nn.Module):
             return self.logits(x[:, -1:, :]), None    # only the last position is needed
         logits = self.logits(x)
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-100)
+        if self.mtp is not None and self.training:   # train-only: eval loss stays the plain next-token loss
+            mtp = self.mtp.losses(h, idx, targets, self.tok_emb, self.logits, cos, sin)
+            self.last_mtp_losses = [m.detach() for m in mtp]
+            if mtp:
+                loss = loss + self.cfg.mtp_weight * torch.stack(mtp).mean()
         if self.cfg.n_experts > 0 and self.training:
             loss = loss + self.cfg.moe_aux_weight * self.moe_aux_loss()
         return logits, loss
@@ -268,7 +289,10 @@ class GPT(nn.Module):
 
     def moe_aux_loss(self) -> torch.Tensor:
         """Mean load-balancing loss over MoE layers (from the most recent forward)."""
-        losses = [b.ffn.aux_loss for b in self.blocks if isinstance(b.ffn, MoEFFN)]
+        blocks = list(self.blocks)
+        if self.mtp is not None and self.training:   # MTP blocks only run in training
+            blocks += [m.block for m in self.mtp.depths]
+        losses = [b.ffn.aux_loss for b in blocks if isinstance(b.ffn, MoEFFN)]
         return torch.stack(losses).mean() if losses else torch.tensor(0.0)
 
     def configure_optimizer(self, lr: float, weight_decay: float = 0.1, betas=(0.9, 0.95), optimizer: str = "adamw"):
