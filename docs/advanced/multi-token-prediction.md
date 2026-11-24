@@ -100,6 +100,7 @@ What this shows, honestly:
 1. **Speculative decoding with the MTP head.** Keep the trunk's hidden states for the whole prefix,
    run depth 1 on `[h⁰; Emb(next token)]` to draft one extra token, then verify both with one main
    forward. Measure the acceptance rate on Tiny Shakespeare (DeepSeek-V3: 85–90 %).
+   (Solved in [MTP self-speculative decoding](mtp-speculative-decoding.md).)
 2. Implement Gloeckle-style *parallel* heads (no chaining, each head reads only `h⁰`) and compare
    the head losses with the sequential design at depth 2–3.
 3. Schedule λ: 0.3 for the first 70 % of steps, then 0.1 (DeepSeek-V3's recipe). Does it help the

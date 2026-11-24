@@ -3,6 +3,25 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-24 — Self-speculative decoding with the MTP heads as the draft
+- `llm/speculative.py`: `mtp_speculative_stream()` (drop-in for `stream()`): MTP depths 1..D draft the next tokens
+  from the trunk's hidden state, one main forward verifies `[pending, d_1..d_D]`, speculative-sampling accept /
+  residual resample (`accept_or_resample()`, exact target distribution; greedy = argmax match), bonus token when all
+  accepted. Main KV cache rolled back with `truncate_cache()`; one KV cache per MTP depth that only keeps positions
+  whose inputs are committed tokens. `filtered_probs()` applies temperature / top-k / top-p to both p and q;
+  `SpecStats` (acceptance rate, tokens per main pass, per-depth acceptance); `speculative_generate()`;
+  `scripts/bench_speculative.py`. Opt-in: `stream()` / `generate()` unchanged. Limits: batch 1, no repetition penalty,
+  no sliding-window layers, stops at a full context
+- `tests/test_19_mtp_speculative.py` (12 tests: greedy output = plain greedy for dense / MLA / MoE / QK-norm and every
+  n_draft, accepts drafts + fewer main passes on a trained tiny model, cached drafts = uncached recomputation,
+  end-of-context, accept/resample reproduces p and Σ min(p, q) acceptance, sampled 2nd-token marginal = exact,
+  stop ids / errors); full suite: 98 passed
+- Measured (nano, vocab 512, 400 steps, 8 prompts × 100 tokens, CPU 2 threads): D=1 checkpoint greedy — 70.1 %
+  acceptance, **1.68 tokens per main pass**, identical text, wall-clock 0.98–1.04× plain (T=0.8: 73.4 %, 1.72, 0.97×);
+  D=2 checkpoint, 2 drafts greedy — 54.1 % (64 % / 44 % per depth), **2.04 tokens per pass**, 0.92× (T=0.8: 2.23, 0.92×).
+  Fewer main passes but no wall-clock gain at nano size: one MTP block is ~27 % of a 4-block step and a multi-token
+  verify costs ~1.17× a single-token one. Doc: `docs/advanced/mtp-speculative-decoding.md`
+
 ## 2026-11-23 — Multi-token prediction (MTP) auxiliary heads (DeepSeek-V3)
 - `llm/mtp.py`: `MTPModule` (RMSNorm(h) ‖ RMSNorm(Emb(t_{i+k})) → Linear 2d→d → one `Block` → RMSNorm) and
   `MultiTokenPrediction` (D sequential depths sharing the main embedding + output head; depth k runs on length T − k and

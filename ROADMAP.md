@@ -25,7 +25,7 @@ Rules for every item:
 - [x] Gradient checkpointing flag to save memory — `llm/checkpointing.py`
 - [x] Multi-GPU training with DistributedDataParallel (`torchrun`) — `llm/distributed.py`
 - [x] Multi-token prediction auxiliary head (DeepSeek-V3) — `llm/mtp.py`
-- [ ] Speculative decoding using the MTP head as the draft (follow-up to `llm/mtp.py`)
+- [x] Speculative decoding using the MTP head as the draft (follow-up to `llm/mtp.py`) — `llm/speculative.py`
 
 ## Inference
 - [ ] Speculative decoding with a draft model — see `feature/speculative-decoding`

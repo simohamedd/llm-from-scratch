@@ -33,6 +33,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | + | [Gradient checkpointing](docs/advanced/gradient-checkpointing.md) | drop block activations in forward, recompute them in backward via saved-tensor hooks (2–2.6× less peak memory, identical gradients) | `llm/checkpointing.py` | `develop` |
 | + | [Multi-GPU data-parallel training](docs/advanced/distributed-training.md) | `torchrun`, broadcast weights, bucketed gradient all-reduce (= one big batch), rank-0 logging / checkpoints | `llm/distributed.py` | `develop` |
 | + | [Multi-token prediction](docs/advanced/multi-token-prediction.md) | DeepSeek-V3 sequential MTP modules: predict tokens 2..D+1 ahead with shared embedding/head, train-only extra loss | `llm/mtp.py` | `develop` |
+| + | [MTP self-speculative decoding](docs/advanced/mtp-speculative-decoding.md) | MTP heads draft the next tokens, one main pass verifies them (rejection sampling, cache rollback); greedy output identical to plain | `llm/speculative.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.
