@@ -28,7 +28,7 @@ Rules for every item:
 - [x] Speculative decoding using the MTP head as the draft (follow-up to `llm/mtp.py`) — `llm/speculative.py`
 
 ## Inference
-- [ ] Speculative decoding with a draft model — see `feature/speculative-decoding`
+- [x] Speculative decoding with a draft model — `llm/speculative.py` (`draft_speculative_stream`)
 - [ ] Batched generation with padding + left-padded attention masks
 - [ ] int4 group-wise quantization (GGUF Q4-style)
 - [ ] Prefix caching in the server for repeated system prompts

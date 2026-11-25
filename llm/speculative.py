@@ -1,4 +1,8 @@
-"""Self-speculative decoding with the multi-token prediction (MTP) heads as the draft.
+"""Speculative decoding: MTP self-drafting, and a separate small draft model.
+
+Two drafts share the same verification machinery below:
+  * `mtp_speculative_stream`   — the model's own multi-token prediction heads draft (DeepSeek-V3)
+  * `draft_speculative_stream` — a separate small model with the same tokenizer drafts (Leviathan et al.)
 
 Plain decoding runs the whole model once per new token. On small batches that forward pass is
 dominated by fixed costs (reading the weights, kernel launches, Python), so checking 3 tokens costs
@@ -258,10 +262,136 @@ def mtp_speculative_stream(model: GPT, idx: torch.Tensor, max_new_tokens: int = 
             D = 0
 
 
-def speculative_generate(model: GPT, tokenizer, prompt: str, **kw) -> str:
-    """Like `generate.generate`, but with MTP self-speculative decoding (greedy by default)."""
+@torch.no_grad()
+def draft_speculative_stream(target: GPT, draft: GPT, idx: torch.Tensor, max_new_tokens: int = 100,
+                             temperature: float = 0.0, top_k: int | None = None, top_p: float | None = None,
+                             n_draft: int = 4, stop_ids: set[int] | None = None,
+                             stats: SpecStats | None = None) -> Iterator[int]:
+    """Classic speculative decoding (Leviathan et al. 2023): a separate small `draft` model guesses.
+
+    Both models must share the tokenizer (same vocab_size). Each round, with committed tokens
+    t_0..t_N where t_N ("pending") is not yet in the target's KV cache:
+
+        draft:   feed the draft the committed tokens it has not cached yet, then its own guesses,
+                 one token per forward pass → d_1 .. d_K with distributions q_1 .. q_K
+        verify:  target on [t_N, d_1, .., d_K] in ONE forward pass → p_0 .. p_K
+        accept / resample exactly as in `mtp_speculative_stream` (output distribution = target's)
+
+    Unlike MTP drafting, the draft is a full language model with its own KV cache over the same
+    token sequence; after verification both caches are truncated to the committed prefix (the draft
+    simply catches up on the correction / bonus token at the start of the next round).
+    It pays off when the draft is much cheaper than the target and agrees with it often:
+    with acceptance rate α and draft/target cost ratio c, the expected speed-up is
+    (1 − α^{K+1}) / ((1 − α)(c·K + 1))  (Leviathan et al., Thm 3.8).
+
+    temperature 0 = greedy: output is then token-for-token `stream(target, ..., temperature=0,
+    repetition_penalty=1)`, whatever the draft. Same limits as the MTP version: batch 1, no
+    repetition penalty, no sliding-window layers, stop at the (smaller) context window.
+    """
+    if draft.cfg.vocab_size != target.cfg.vocab_size:
+        raise ValueError("draft and target must share the tokenizer (different vocab_size)")
+    if n_draft < 1:
+        raise ValueError("n_draft must be >= 1")
+    if any(b.attn.window for m in (target, draft) for b in m.blocks):
+        raise ValueError("speculative decoding needs truncatable caches: no sliding-window layers")
+    if idx.shape[0] != 1:
+        raise ValueError("batch size 1 only")
+    target.eval()
+    draft.eval()
+    stats = stats if stats is not None else SpecStats()
+    stats.accepted_at_depth += [0] * (n_draft - len(stats.accepted_at_depth))
+    greedy = temperature <= 0
+    probs = lambda logits: filtered_probs(logits, temperature, top_k, top_p)   # noqa: E731
+    ctx = min(target.cfg.max_seq_len, draft.cfg.max_seq_len)
+    idx = idx[:, -ctx:]
+    device = idx.device
+
+    # ---- prefill the target on the prompt and draw the first pending token from it
+    tcache, dcache = target.new_cache(), draft.new_cache()
+    logits, _ = target(idx, cache=tcache)
+    stats.main_calls += 1
+    seq = idx[0].tolist()
+    pending = _sample(probs(logits[0, -1]), greedy)
+    seq.append(pending)
+
+    emitted = 0
+    while True:
+        if stop_ids and pending in stop_ids:
+            return
+        yield pending
+        emitted += 1
+        stats.tokens += 1
+        if emitted >= max_new_tokens:
+            return
+        L = len(seq)                # committed tokens; the target cache holds L - 1 of them
+        if L > ctx:
+            return
+        K = min(n_draft, ctx - L)   # verify feeds K + 1 tokens at positions L-1 .. L-1+K
+
+        # ---- draft K tokens autoregressively (first step catches up on all uncached committed tokens)
+        drafts, qs = [], []
+        inp = seq[dcache.length:]
+        for _ in range(K):
+            dl, _ = draft(torch.tensor([inp], device=device), cache=dcache)
+            dl = dl[0, -1]
+            if greedy:
+                tok = int(dl.argmax())
+            else:
+                qs.append(probs(dl))
+                tok = _sample(qs[-1], greedy)
+            drafts.append(tok)
+            inp = [tok]             # d_K itself is never fed: only needed if accepted (next round)
+
+        # ---- verify all drafts with one target pass
+        logits, _ = target(torch.tensor([[pending] + drafts], device=device), cache=tcache, all_logits=True)
+        stats.main_calls += 1
+        logits = logits[0]          # (K+1, V)
+        a = 0
+        if greedy:
+            best = logits.argmax(-1).tolist()
+            while a < K and drafts[a] == best[a]:
+                a += 1
+            pending = best[a]
+        else:
+            ps = probs(logits)
+            for j, d in enumerate(drafts):
+                ok, tok = accept_or_resample(ps[j], qs[j], d, greedy)
+                if not ok:
+                    pending = tok
+                    break
+                a += 1
+            else:
+                pending = _sample(ps[K], greedy)            # bonus token
+        for j in range(a):
+            stats.accepted_at_depth[j] += 1
+        if drafts:
+            stats.rounds += 1
+            stats.drafted += K
+            stats.accepted += a
+            stats.drafts.append((L, drafts))
+        truncate_cache(tcache, L + a)                       # pending + accepted drafts stay cached
+        truncate_cache(dcache, min(dcache.length, L + a))   # draft forgets its rejected guesses
+        for d in drafts[:a]:
+            if stop_ids and d in stop_ids:
+                return
+            yield d
+            emitted += 1
+            stats.tokens += 1
+            if emitted >= max_new_tokens:
+                return
+        seq.extend(drafts[:a] + [pending])
+
+
+def speculative_generate(model: GPT, tokenizer, prompt: str, draft: GPT | None = None, **kw) -> str:
+    """Like `generate.generate`, but speculative (greedy by default).
+
+    draft=None: MTP self-speculative decoding with the model's own heads; otherwise `draft` is a
+    separate small model sharing the tokenizer (`draft_speculative_stream`).
+    """
     device = next(model.parameters()).device
     ids = tokenizer.encode(prompt) or [tokenizer.token_id("<|bos|>")]
     x = torch.tensor([ids], dtype=torch.long, device=device)
     stop = {tokenizer.token_id("<|eos|>")}
-    return tokenizer.decode(list(mtp_speculative_stream(model, x, stop_ids=stop, **kw)))
+    if draft is None:
+        return tokenizer.decode(list(mtp_speculative_stream(model, x, stop_ids=stop, **kw)))
+    return tokenizer.decode(list(draft_speculative_stream(model, draft, x, stop_ids=stop, **kw)))

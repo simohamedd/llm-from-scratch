@@ -34,6 +34,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | + | [Multi-GPU data-parallel training](docs/advanced/distributed-training.md) | `torchrun`, broadcast weights, bucketed gradient all-reduce (= one big batch), rank-0 logging / checkpoints | `llm/distributed.py` | `develop` |
 | + | [Multi-token prediction](docs/advanced/multi-token-prediction.md) | DeepSeek-V3 sequential MTP modules: predict tokens 2..D+1 ahead with shared embedding/head, train-only extra loss | `llm/mtp.py` | `develop` |
 | + | [MTP self-speculative decoding](docs/advanced/mtp-speculative-decoding.md) | MTP heads draft the next tokens, one main pass verifies them (rejection sampling, cache rollback); greedy output identical to plain | `llm/speculative.py` | `develop` |
+| + | [Draft-model speculative decoding](docs/advanced/draft-model-speculative-decoding.md) | a small model with the same tokenizer drafts K tokens, the big one verifies them in one pass (exact target distribution, both caches rolled back) | `llm/speculative.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.
@@ -102,7 +103,7 @@ flowchart LR
 | `develop` | integration branch — features and Radar PRs land here first |
 | `chapter/01-tokenizer` … `chapter/07-apps` | step-by-step snapshots of the course |
 | `feature/grpo-reasoning` | 🚧 GRPO reinforcement learning for reasoning |
-| `feature/speculative-decoding` | 🚧 draft-model speculative decoding |
+| `feature/speculative-decoding` | proposal for draft-model speculative decoding (implemented on `develop`) |
 | `feature/rag-agent` | 🚧 RAG + tool-calling agent on the local API |
 | `radar/weekly-update` | created automatically by the LLM Radar bot |
 

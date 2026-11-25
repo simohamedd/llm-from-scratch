@@ -3,6 +3,27 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-25 — Speculative decoding with a separate draft model
+- `llm/speculative.py`: `draft_speculative_stream(target, draft, …)` (drop-in for `stream()`): a small model with the
+  same tokenizer drafts K tokens autoregressively on its own KV cache (first step catches up on uncached committed
+  tokens, d_K never fed), one target forward verifies `[pending, d_1..d_K]`, same `accept_or_resample()` /
+  `filtered_probs()` as the MTP version (exact target distribution; greedy = argmax match), bonus token when all
+  accepted, both caches rolled back with `truncate_cache()`. `speculative_generate(..., draft=model)`;
+  `scripts/bench_speculative.py --draft nano.pt --n-draft 1 2 4` (also times the draft alone = cost ratio c).
+  Opt-in: `stream()` / `generate()` / MTP path unchanged. Limits: batch 1, no repetition penalty, no sliding-window
+  layers, stops at the smaller context window. Proposal from `feature/speculative-decoding` copied to
+  `docs/proposals/` and ticked
+- `tests/test_20_draft_speculative.py` (10 tests: greedy output = target greedy for random dense / smaller / MLA / MoE
+  drafts and K ∈ {1, 3, 7}, draft = target accepts 100 % with 1 + 4 target passes for 21 tokens, trained draft is
+  accepted + saves passes, cached drafts = cache-free recomputation, end-of-context, sampled 2nd-token marginal = exact,
+  errors / stop ids / `speculative_generate`); full suite: 108 passed
+- Measured (Tiny Shakespeare, vocab 512, 400 steps each, target micro 4.6 M val 2.677, draft nano 0.8 M val 2.865,
+  8 prompts × 100 tokens, CPU 2 threads): greedy K=1 57.9 % acceptance, 1.57 tokens / target pass, 0.82× wall-clock;
+  K=2 1.94, 0.78×; K=4 2.20, 0.56×; K=6 2.29, 0.46× — text identical to plain every time. T=0.8: K=2 64.0 %,
+  2.24 tokens / pass, 0.93×; K=4 2.72, 0.74×. **No wall-clock gain on CPU at this size**: nano is only ~1.9× cheaper
+  than micro (c ≈ 0.52; overhead-dominated), so the Leviathan formula predicts ≈ 1.0× at best for K=1.
+  Doc: `docs/advanced/draft-model-speculative-decoding.md`
+
 ## 2026-11-24 — Self-speculative decoding with the MTP heads as the draft
 - `llm/speculative.py`: `mtp_speculative_stream()` (drop-in for `stream()`): MTP depths 1..D draft the next tokens
   from the trunk's hidden state, one main forward verifies `[pending, d_1..d_D]`, speculative-sampling accept /
