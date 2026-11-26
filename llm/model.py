@@ -14,6 +14,7 @@ Components, each a small class you can read top to bottom:
   * optional RoPE scaling (linear / NTK / YaRN) for longer context (cfg.rope_scaling, see rope_scaling.py)
   * optional gradient checkpointing — recompute activations in backward (cfg.grad_checkpoint, see checkpointing.py)
   * optional multi-token prediction heads — extra training loss on tokens 2..D+1 ahead (cfg.mtp_depth, see mtp.py)
+  * optional key-padding mask for batched generation of left-padded prompts (cache.key_valid, see batching.py)
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ import torch.nn.functional as F
 
 from .checkpointing import checkpoint, should_checkpoint
 from .config import ModelConfig
+from .batching import padded_attention_mask
 from .moe import MoEFFN, expert_hidden
 from .rope_scaling import rope_tables
 from .sliding_window import attention_mask, layer_window
@@ -71,6 +73,8 @@ class KVCache:
         self.v: list[torch.Tensor | None] = [None] * n_layers
         self.windows = windows or [0] * n_layers
         self.seen = [0] * n_layers
+        # batched generation only: (B, seen) bool, False = padding key. None = no padding (see batching.py)
+        self.key_valid: torch.Tensor | None = None
 
     @property
     def length(self) -> int:
@@ -119,14 +123,18 @@ class Attention(nn.Module):
         rep = self.n_heads // self.n_kv
         k = k.repeat_interleave(rep, dim=1)
         v = v.repeat_interleave(rep, dim=1)
+        # left-padded batch: causal/window mask AND "key is not a pad" (None otherwise)
+        pad_mask = padded_attention_mask(T, k.shape[2], self.window, cache, device=x.device)
         if self.cfg.attn_softcap > 0:   # hand-written attention (SDPA can't soft-cap scores)
             y = softcapped_attention(q, k, v, self.cfg.attn_softcap, window=self.window,
-                                     dropout_p=self.dropout if self.training else 0.0)
+                                     dropout_p=self.dropout if self.training else 0.0, mask=pad_mask)
             return self.wo(y.transpose(1, 2).contiguous().view(B, T, -1))
         # causal mask is only needed when processing more than one new token
         is_causal = T > 1 and (cache is None or cache.length == T)
         mask = None
-        if self.window > 0:           # sliding window: explicit banded mask (also for T == 1)
+        if pad_mask is not None:
+            is_causal, mask = False, pad_mask
+        elif self.window > 0:           # sliding window: explicit banded mask (also for T == 1)
             is_causal = False
             mask = attention_mask(T, k.shape[2], self.window, device=x.device)
         elif T > 1 and not is_causal:   # prefill on top of an existing cache

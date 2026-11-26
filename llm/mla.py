@@ -63,6 +63,7 @@ import torch.nn.functional as F
 
 from .config import ModelConfig
 from .model import KVCache, RMSNorm, apply_rope
+from .batching import padded_attention_mask
 from .sliding_window import attention_mask, layer_window
 from .stability import softcap, softcapped_attention
 
@@ -152,23 +153,25 @@ class MLAttention(nn.Module):
         k_rope = apply_rope(k_rope.unsqueeze(1), cos, sin)           # (B, 1, T, d_r), shared by heads
         if cache is not None:   # the cache stores the latent and the rotary key, nothing else
             c_kv, k_rope = cache.update(self.layer_idx, c_kv, k_rope)
+        # left-padded batch: causal/window mask AND "key is not a pad" (None otherwise)
+        pad_mask = padded_attention_mask(T, c_kv.shape[2], self.window, cache, device=x.device)
         if absorb is None:      # default: absorbed weights for generation, naive path for training
             absorb = cache is not None and not self.training
         if absorb and self.merged:   # fastest path: two fused matmuls, no per-head einsums
             q_lat = F.linear(qin, self.w_qlat).view(B, T, self.H, self.dc).transpose(1, 2)
             q_rope = F.linear(qin, self.w_qrope).view(B, T, self.H, self.dr).transpose(1, 2)
-            o_lat = self._latent_attention(q_lat, apply_rope(q_rope, cos, sin), c_kv, k_rope)
+            o_lat = self._latent_attention(q_lat, apply_rope(q_rope, cos, sin), c_kv, k_rope, pad_mask)
             return F.linear(o_lat.transpose(1, 2).reshape(B, T, -1), self.w_ov)
         q = self.q_proj(qin).view(B, T, self.H, self.hd + self.dr).transpose(1, 2)
         q_nope, q_rope = q.split([self.hd, self.dr], dim=-1)
         q_rope = apply_rope(q_rope, cos, sin)
         if absorb:
-            y = self._absorbed(q_nope, q_rope, c_kv, k_rope)
+            y = self._absorbed(q_nope, q_rope, c_kv, k_rope, pad_mask)
         else:
-            y = self._naive(q_nope, q_rope, c_kv, k_rope, cache)
+            y = self._naive(q_nope, q_rope, c_kv, k_rope, cache, pad_mask)
         return self.wo(y.transpose(1, 2).contiguous().view(B, T, -1))
 
-    def _naive(self, q_nope, q_rope, c_kv, k_rope, cache):
+    def _naive(self, q_nope, q_rope, c_kv, k_rope, cache, pad_mask=None):
         """Up-project the latents into full per-head keys/values, then ordinary attention."""
         B, _, T, _ = q_nope.shape
         S = c_kv.shape[2]
@@ -178,24 +181,28 @@ class MLAttention(nn.Module):
         k = torch.cat([k_nope, k_rope.expand(-1, self.H, -1, -1)], dim=-1)
         drop = self.dropout if self.training else 0.0
         if self.cfg.attn_softcap > 0:
-            return softcapped_attention(q, k, v, self.cfg.attn_softcap, dropout_p=drop, window=self.window)
+            return softcapped_attention(q, k, v, self.cfg.attn_softcap, dropout_p=drop, window=self.window,
+                                        mask=pad_mask)
         is_causal = T > 1 and (cache is None or cache.length == T) and self.window == 0
         mask = None if is_causal or (T == 1 and self.window == 0) else attention_mask(T, S, self.window, q.device)
+        if pad_mask is not None:
+            is_causal, mask = False, pad_mask
         return F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=is_causal, dropout_p=drop)
 
-    def _absorbed(self, q_nope, q_rope, c_kv, k_rope):
+    def _absorbed(self, q_nope, q_rope, c_kv, k_rope, pad_mask=None):
         """Attention computed directly against the cached latents (no full K/V is ever built)."""
         w = self.w_ukv.weight.view(self.H, 2 * self.hd, self.dc)
         w_uk, w_uv = w[:, :self.hd], w[:, self.hd:]                  # (H, head_dim, d_c) each
         q_lat = torch.einsum("bhtd,hdc->bhtc", q_nope, w_uk)        # query moved into latent space
-        o_lat = self._latent_attention(q_lat, q_rope, c_kv, k_rope)
+        o_lat = self._latent_attention(q_lat, q_rope, c_kv, k_rope, pad_mask)
         return torch.einsum("bhtc,hdc->bhtd", o_lat, w_uv)          # up-project once, afterwards
 
-    def _latent_attention(self, q_lat, q_rope, c_kv, k_rope):
+    def _latent_attention(self, q_lat, q_rope, c_kv, k_rope, pad_mask=None):
         """softmax(q_lat·c + q_rope·k_rope) · c  — attention in latent space, returns (B, H, T, d_c)."""
         T, S = q_lat.shape[2], c_kv.shape[2]
         scores = (q_lat @ c_kv.transpose(-2, -1) + q_rope @ k_rope.transpose(-2, -1)) * self.scale
         scores = softcap(scores, self.cfg.attn_softcap)
-        scores = scores.masked_fill(~attention_mask(T, S, self.window, q_lat.device), float("-inf"))
+        allowed = pad_mask if pad_mask is not None else attention_mask(T, S, self.window, q_lat.device)
+        scores = scores.masked_fill(~allowed, float("-inf"))
         att = F.softmax(scores.float(), dim=-1).type_as(q_lat)      # (B, H, T, S)
         return att @ c_kv                                            # weighted sum of latents

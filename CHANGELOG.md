@@ -3,6 +3,24 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-26 — Batched generation with left padding + key-padding attention masks
+- `llm/batching.py`: `left_pad()` (pads on the left so every row ends in the same column), `padded_attention_mask()`
+  (causal / sliding-window mask AND `cache.key_valid`, plus "always see yourself" so pad queries never get an all
+  -inf row → NaN), `batch_stream()` (one prefill for all rows, one (B, 1) step per token, per-row stop ids, finished
+  rows fed a masked pad, repetition penalty ignores pads), `batch_generate_ids()`, `generate_batch()` (text in/out,
+  `<|pad|>` as pad). RoPE needs no per-row positions (scores depend only on distances). `KVCache.key_valid` (default
+  `None` = no mask code runs); mask threaded through GQA / soft-capped / sliding-window / MLA (naive, absorbed,
+  merged) attention. `scripts/bench_batched.py`. Opt-in: `stream()` / `generate()` / training unchanged. Limits:
+  static batching, stops at the context length
+- `tests/test_21_batched_generation.py` (26 tests: left_pad, mask shape / self-attend rule, padded prefill logits =
+  unpadded and batched greedy = one-at-a-time for dense / SWA / local-global / soft-cap / QK-norm / MLA / MLA + q-rank +
+  soft-cap / MoE + shared / YaRN, merged MLA weights, pad id irrelevant + repetition penalty, independent stops,
+  context limit, seeded sampling, `generate_batch` = `generate`); full suite: 134 passed
+- Measured (Tiny Shakespeare, vocab 512, nano 400 steps val 2.843, 32 prompts × 100 greedy tokens, CPU 2 threads, two
+  runs): `stream()` one at a time 919–950 tok/s; batch 1 0.79–0.81× (explicit-mask overhead), batch 2 1.32–1.56×,
+  4 2.53–2.55×, 8 3.86–4.43×, 16 7.01–7.37×, **32 10.4–11.2×** — generated ids identical to one-at-a-time for 32/32
+  prompts at every batch size. Doc: `docs/advanced/batched-generation.md`
+
 ## 2026-11-25 — Speculative decoding with a separate draft model
 - `llm/speculative.py`: `draft_speculative_stream(target, draft, …)` (drop-in for `stream()`): a small model with the
   same tokenizer drafts K tokens autoregressively on its own KV cache (first step catches up on uncached committed

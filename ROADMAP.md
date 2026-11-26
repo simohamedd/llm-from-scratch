@@ -29,7 +29,7 @@ Rules for every item:
 
 ## Inference
 - [x] Speculative decoding with a draft model — `llm/speculative.py` (`draft_speculative_stream`)
-- [ ] Batched generation with padding + left-padded attention masks
+- [x] Batched generation with padding + left-padded attention masks — `llm/batching.py`
 - [ ] int4 group-wise quantization (GGUF Q4-style)
 - [ ] Prefix caching in the server for repeated system prompts
 

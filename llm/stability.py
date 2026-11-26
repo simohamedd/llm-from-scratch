@@ -37,7 +37,8 @@ def softcap(x: torch.Tensor, cap: float) -> torch.Tensor:
 
 
 def softcapped_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cap: float,
-                         dropout_p: float = 0.0, window: int = 0) -> torch.Tensor:
+                         dropout_p: float = 0.0, window: int = 0,
+                         mask: torch.Tensor | None = None) -> torch.Tensor:
     """Causal attention with soft-capped scores (what Gemma 2 does).
 
     F.scaled_dot_product_attention can't apply a function between q·k and softmax, so this is the
@@ -48,11 +49,13 @@ def softcapped_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cap:
     q: (B, H, T, D), k/v: (B, H, S, D) with S >= T (S > T when a KV cache holds earlier tokens).
     Query i sits at absolute position S - T + i and may attend to keys 0 .. S - T + i
     (only the last `window` of them when window > 0, see sliding_window.py).
+    mask (optional, broadcastable to (B, H, T, S), True = may attend) replaces that causal mask,
+    e.g. the key-padding mask of batched generation (see batching.py).
     """
     T, S = q.shape[2], k.shape[2]
     scores = (q @ k.transpose(-2, -1)) / math.sqrt(q.shape[-1])     # (B, H, T, S)
     scores = softcap(scores, cap)
-    allowed = attention_mask(T, S, window, device=q.device)
+    allowed = mask if mask is not None else attention_mask(T, S, window, device=q.device)
     scores = scores.masked_fill(~allowed, float("-inf"))
     att = F.softmax(scores.float(), dim=-1).type_as(q)
     if dropout_p > 0:

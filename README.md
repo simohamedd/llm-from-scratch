@@ -35,6 +35,7 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | + | [Multi-token prediction](docs/advanced/multi-token-prediction.md) | DeepSeek-V3 sequential MTP modules: predict tokens 2..D+1 ahead with shared embedding/head, train-only extra loss | `llm/mtp.py` | `develop` |
 | + | [MTP self-speculative decoding](docs/advanced/mtp-speculative-decoding.md) | MTP heads draft the next tokens, one main pass verifies them (rejection sampling, cache rollback); greedy output identical to plain | `llm/speculative.py` | `develop` |
 | + | [Draft-model speculative decoding](docs/advanced/draft-model-speculative-decoding.md) | a small model with the same tokenizer drafts K tokens, the big one verifies them in one pass (exact target distribution, both caches rolled back) | `llm/speculative.py` | `develop` |
+| + | [Batched generation](docs/advanced/batched-generation.md) | many prompts at once: left padding, key-padding attention mask (RoPE needs no fix), per-row stop; greedy output identical, ~10× tokens/s at batch 32 on CPU | `llm/batching.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.
