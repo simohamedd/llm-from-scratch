@@ -14,7 +14,7 @@ from typing import Iterator
 
 import torch
 
-from .model import GPT, KVCache
+from .model import GPT
 
 
 def sample_next(logits: torch.Tensor, temperature: float = 1.0, top_k: int | None = None,
@@ -46,9 +46,9 @@ def stream(model: GPT, idx: torch.Tensor, max_new_tokens: int = 100, temperature
            stop_ids: set[int] | None = None) -> Iterator[int]:
     """Yield token ids one at a time (perfect for streaming APIs)."""
     model.eval()
-    ctx = model.cfg.context_length
+    ctx = model.cfg.max_seq_len   # context_length, or longer with RoPE scaling
     idx = idx[:, -ctx:]
-    cache = KVCache(model.cfg.n_layers)
+    cache = model.new_cache()
     logits, _ = model(idx, cache=cache)                       # prefill
     seq = idx
     for _ in range(max_new_tokens):
@@ -59,7 +59,7 @@ def stream(model: GPT, idx: torch.Tensor, max_new_tokens: int = 100, temperature
         yield tok
         seq = torch.cat([seq, nxt], dim=1)
         if cache.length >= ctx:                                # sliding window: rebuild cache
-            cache = KVCache(model.cfg.n_layers)
+            cache = model.new_cache()
             logits, _ = model(seq[:, -ctx:], cache=cache)
         else:
             logits, _ = model(nxt, cache=cache)

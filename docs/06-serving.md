@@ -25,6 +25,8 @@ curl localhost:8000/v1/chat/completions -H 'content-type: application/json' \
 from llm.quantize import quantize_int8, model_size_mb
 quantize_int8(model)   # Linear weights -> int8 + per-row scale (~4x smaller)
 ```
+Going further: 4-bit with one scale per group of 32 weights (GGUF Q4_0 / Q4_1) — see
+[int4 group-wise quantization](advanced/int4-quantization.md).
 
 ## Production equivalents
 | This repo | Production tool |

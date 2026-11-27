@@ -21,6 +21,22 @@ ecosystem and new arXiv papers, and opens a Pull Request with what changed.
 | 5 | [Fine-tuning](docs/05-finetuning.md) | chat template, SFT, **LoRA**, **DPO** | `llm/lora.py`, `llm/finetune.py` | `chapter/05-finetuning` |
 | 6 | [Serving](docs/06-serving.md) | int8 quantization, **OpenAI-compatible API** with SSE streaming | `llm/serve.py`, `llm/quantize.py` | `chapter/06-serving` |
 | 7 | [Apps](docs/07-apps.md) | RAG, tool use, agents, MCP on top of your model | 🚧 | `chapter/07-apps` |
+| + | [Mixture of Experts](docs/advanced/mixture-of-experts.md) | router, top-k experts, load-balancing loss | `llm/moe.py` | `develop` |
+| + | [Shared experts & aux-loss-free balancing](docs/advanced/deepseek-moe.md) | always-on shared experts, bias-only routing balance (DeepSeek-V3) | `llm/moe.py` | `develop` |
+| + | [QK-norm & soft-capping](docs/advanced/qk-norm-softcap.md) | RMSNorm on Q/K heads, tanh logit caps (training stability) | `llm/stability.py` | `develop` |
+| + | [Sliding-window attention](docs/advanced/sliding-window-attention.md) | banded local attention, local/global layers, rolling KV cache | `llm/sliding_window.py` | `develop` |
+| + | [Multi-head Latent Attention](docs/advanced/multi-head-latent-attention.md) | compressed latent KV cache, decoupled RoPE, weight absorption (DeepSeek) | `llm/mla.py` | `develop` |
+| + | [MLA query compression & merged weights](docs/advanced/mla-decoding.md) | low-rank queries, precomputed absorbed matrices for faster decoding (DeepSeek) | `llm/mla.py` | `develop` |
+| + | [RoPE scaling (PI / NTK / YaRN)](docs/advanced/rope-scaling.md) | run past the training length: interpolated frequencies, YaRN ramp + temperature | `llm/rope_scaling.py` | `develop` |
+| + | [Muon optimizer](docs/advanced/muon.md) | momentum + Newton-Schulz orthogonalisation for matrix weights, AdamW for the rest (Kimi K2, Moonlight) | `llm/muon.py` | `develop` |
+| + | [Warmup-Stable-Decay schedule](docs/advanced/wsd-schedule.md) | constant LR plateau + short final decay (linear / cosine / 1-sqrt), budget-free training (MiniCPM, SmolLM2) | `llm/schedules.py` | `develop` |
+| + | [Gradient checkpointing](docs/advanced/gradient-checkpointing.md) | drop block activations in forward, recompute them in backward via saved-tensor hooks (2–2.6× less peak memory, identical gradients) | `llm/checkpointing.py` | `develop` |
+| + | [Multi-GPU data-parallel training](docs/advanced/distributed-training.md) | `torchrun`, broadcast weights, bucketed gradient all-reduce (= one big batch), rank-0 logging / checkpoints | `llm/distributed.py` | `develop` |
+| + | [Multi-token prediction](docs/advanced/multi-token-prediction.md) | DeepSeek-V3 sequential MTP modules: predict tokens 2..D+1 ahead with shared embedding/head, train-only extra loss | `llm/mtp.py` | `develop` |
+| + | [MTP self-speculative decoding](docs/advanced/mtp-speculative-decoding.md) | MTP heads draft the next tokens, one main pass verifies them (rejection sampling, cache rollback); greedy output identical to plain | `llm/speculative.py` | `develop` |
+| + | [Draft-model speculative decoding](docs/advanced/draft-model-speculative-decoding.md) | a small model with the same tokenizer drafts K tokens, the big one verifies them in one pass (exact target distribution, both caches rolled back) | `llm/speculative.py` | `develop` |
+| + | [Batched generation](docs/advanced/batched-generation.md) | many prompts at once: left padding, key-padding attention mask (RoPE needs no fix), per-row stop; greedy output identical, ~10× tokens/s at batch 32 on CPU | `llm/batching.py` | `develop` |
+| + | [int4 group-wise quantization](docs/advanced/int4-quantization.md) | GGUF Q4_0 / Q4_1: one fp16 scale per 32 weights, two codes per byte; 4.5 bits / weight, Linears 7× smaller than fp32 with no measurable loss change at this scale | `llm/quantize.py` | `develop` |
 
 Each `chapter/*` branch contains the project **only up to that chapter**, so you can check one
 out and build the next piece yourself, then compare with the next branch.
@@ -88,13 +104,17 @@ flowchart LR
 | `main` | stable, complete, all tests green |
 | `develop` | integration branch — features and Radar PRs land here first |
 | `chapter/01-tokenizer` … `chapter/07-apps` | step-by-step snapshots of the course |
-| `feature/mixture-of-experts` | 🚧 MoE feed-forward (DeepSeek / Mixtral style) |
 | `feature/grpo-reasoning` | 🚧 GRPO reinforcement learning for reasoning |
-| `feature/speculative-decoding` | 🚧 draft-model speculative decoding |
+| `feature/speculative-decoding` | proposal for draft-model speculative decoding (implemented on `develop`) |
 | `feature/rag-agent` | 🚧 RAG + tool-calling agent on the local API |
 | `radar/weekly-update` | created automatically by the LLM Radar bot |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
+
+## 🗓️ Daily improvements
+
+A scheduled job adds one new technique every day from [`ROADMAP.md`](ROADMAP.md) — built from
+scratch, tested, documented, and pushed to `develop`. See [`CHANGELOG.md`](CHANGELOG.md) for what landed.
 
 ## 📡 Staying up to date
 

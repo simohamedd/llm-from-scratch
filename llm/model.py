@@ -6,6 +6,15 @@ Components, each a small class you can read top to bottom:
   * Grouped-Query Attention — fewer K/V heads than Q heads -> smaller KV cache
   * SwiGLU feed-forward     — gated MLP used by nearly every 2024+ open model
   * KV cache                — makes generation O(n) instead of O(n^2)
+  * optional Mixture of Experts FFN (cfg.n_experts > 0, see moe.py), with optional
+    shared experts and aux-loss-free bias balancing (DeepSeek-V3)
+  * optional QK-norm and logit soft-capping for training stability (see stability.py)
+  * optional sliding-window attention + rolling KV cache (see sliding_window.py)
+  * optional Multi-head Latent Attention — compressed KV cache (cfg.mla_kv_rank > 0, see mla.py)
+  * optional RoPE scaling (linear / NTK / YaRN) for longer context (cfg.rope_scaling, see rope_scaling.py)
+  * optional gradient checkpointing — recompute activations in backward (cfg.grad_checkpoint, see checkpointing.py)
+  * optional multi-token prediction heads — extra training loss on tokens 2..D+1 ahead (cfg.mtp_depth, see mtp.py)
+  * optional key-padding mask for batched generation of left-padded prompts (cache.key_valid, see batching.py)
 """
 from __future__ import annotations
 
@@ -15,7 +24,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .checkpointing import checkpoint, should_checkpoint
 from .config import ModelConfig
+from .batching import padded_attention_mask
+from .moe import MoEFFN, expert_hidden
+from .rope_scaling import rope_tables
+from .sliding_window import attention_mask, layer_window
+from .stability import softcap, softcapped_attention
 
 
 class RMSNorm(nn.Module):
@@ -45,21 +60,35 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
 
 
 class KVCache:
-    """Stores past keys/values per layer so each new token only computes itself."""
+    """Stores past keys/values per layer so each new token only computes itself.
 
-    def __init__(self, n_layers: int):
+    windows (optional, one int per layer): a layer with window w > 0 keeps only its last w - 1
+    keys/values — a rolling buffer (Mistral). That is all a sliding-window layer can ever look at
+    again, so its memory stays constant however long generation runs. `length` still counts every
+    token seen, because RoPE needs absolute positions.
+    """
+
+    def __init__(self, n_layers: int, windows: list[int] | None = None):
         self.k: list[torch.Tensor | None] = [None] * n_layers
         self.v: list[torch.Tensor | None] = [None] * n_layers
+        self.windows = windows or [0] * n_layers
+        self.seen = [0] * n_layers
+        # batched generation only: (B, seen) bool, False = padding key. None = no padding (see batching.py)
+        self.key_valid: torch.Tensor | None = None
 
     @property
     def length(self) -> int:
-        return 0 if self.k[0] is None else self.k[0].shape[2]
+        return self.seen[0]
 
     def update(self, layer: int, k: torch.Tensor, v: torch.Tensor):
+        self.seen[layer] += k.shape[2]
         if self.k[layer] is not None:
             k = torch.cat([self.k[layer], k], dim=2)
             v = torch.cat([self.v[layer], v], dim=2)
-        self.k[layer], self.v[layer] = k, v
+        # return everything for this step's attention, but only *store* what future tokens need
+        w = self.windows[layer]
+        keep = k.shape[2] if w == 0 else min(w - 1, k.shape[2])
+        self.k[layer], self.v[layer] = k[:, :, k.shape[2] - keep:], v[:, :, v.shape[2] - keep:]
         return k, v
 
 
@@ -74,12 +103,19 @@ class Attention(nn.Module):
         self.wv = nn.Linear(cfg.d_model, self.n_kv * self.hd, bias=False)
         self.wo = nn.Linear(self.n_heads * self.hd, cfg.d_model, bias=False)
         self.dropout = cfg.dropout
+        # sliding-window attention: 0 = full causal attention for this layer
+        self.window = layer_window(cfg.sliding_window, cfg.global_every, layer_idx)
+        # QK-norm: one RMSNorm (over head_dim) shared by all query heads, one for all key heads
+        self.q_norm = RMSNorm(self.hd) if cfg.qk_norm else None
+        self.k_norm = RMSNorm(self.hd) if cfg.qk_norm else None
 
     def forward(self, x, cos, sin, cache: KVCache | None = None):
         B, T, _ = x.shape
         q = self.wq(x).view(B, T, self.n_heads, self.hd).transpose(1, 2)
         k = self.wk(x).view(B, T, self.n_kv, self.hd).transpose(1, 2)
         v = self.wv(x).view(B, T, self.n_kv, self.hd).transpose(1, 2)
+        if self.q_norm is not None:   # normalise before RoPE so positions are encoded afterwards
+            q, k = self.q_norm(q), self.k_norm(k)
         q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
         if cache is not None:
             k, v = cache.update(self.layer_idx, k, v)
@@ -87,12 +123,22 @@ class Attention(nn.Module):
         rep = self.n_heads // self.n_kv
         k = k.repeat_interleave(rep, dim=1)
         v = v.repeat_interleave(rep, dim=1)
+        # left-padded batch: causal/window mask AND "key is not a pad" (None otherwise)
+        pad_mask = padded_attention_mask(T, k.shape[2], self.window, cache, device=x.device)
+        if self.cfg.attn_softcap > 0:   # hand-written attention (SDPA can't soft-cap scores)
+            y = softcapped_attention(q, k, v, self.cfg.attn_softcap, window=self.window,
+                                     dropout_p=self.dropout if self.training else 0.0, mask=pad_mask)
+            return self.wo(y.transpose(1, 2).contiguous().view(B, T, -1))
         # causal mask is only needed when processing more than one new token
         is_causal = T > 1 and (cache is None or cache.length == T)
         mask = None
-        if T > 1 and not is_causal:   # prefill on top of an existing cache
-            S = k.shape[2]
-            mask = torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T)
+        if pad_mask is not None:
+            is_causal, mask = False, pad_mask
+        elif self.window > 0:           # sliding window: explicit banded mask (also for T == 1)
+            is_causal = False
+            mask = attention_mask(T, k.shape[2], self.window, device=x.device)
+        elif T > 1 and not is_causal:   # prefill on top of an existing cache
+            mask = attention_mask(T, k.shape[2], device=x.device)
         y = F.scaled_dot_product_attention(
             q, k, v, attn_mask=mask, is_causal=is_causal,
             dropout_p=self.dropout if self.training else 0.0,
@@ -118,9 +164,18 @@ class Block(nn.Module):
     def __init__(self, cfg: ModelConfig, layer_idx: int):
         super().__init__()
         self.norm1 = RMSNorm(cfg.d_model)
-        self.attn = Attention(cfg, layer_idx)
+        if cfg.mla_kv_rank > 0:
+            from .mla import MLAttention   # imported here: mla.py builds on this module
+            self.attn = MLAttention(cfg, layer_idx)
+        else:
+            self.attn = Attention(cfg, layer_idx)
         self.norm2 = RMSNorm(cfg.d_model)
-        self.ffn = SwiGLU(cfg)
+        if cfg.n_experts > 0:
+            hidden = expert_hidden(cfg.d_model, cfg.ffn_mult, cfg.n_experts, cfg.moe_top_k, cfg.moe_shared_experts)
+            self.ffn = MoEFFN(cfg.d_model, hidden, cfg.n_experts, cfg.moe_top_k, n_shared=cfg.moe_shared_experts,
+                              balance=cfg.moe_balance, bias_rate=cfg.moe_bias_rate)
+        else:
+            self.ffn = SwiGLU(cfg)
 
     def forward(self, x, cos, sin, cache=None):
         x = x + self.attn(self.norm1(x), cos, sin, cache)   # pre-norm residual
@@ -138,14 +193,23 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.tok_emb.weight
-        cos, sin = rope_frequencies(cfg.head_dim, cfg.context_length * 2, cfg.rope_theta)
-        self.register_buffer("rope_cos", cos, persistent=False)
-        self.register_buffer("rope_sin", sin, persistent=False)
+        self._build_rope()
         self.apply(self._init_weights)
         # GPT-2 trick: scale residual projections by 1/sqrt(2 * n_layers)
         for name, p in self.named_parameters():
             if name.endswith(("wo.weight", "w_down.weight")):
                 nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * cfg.n_layers))
+        # multi-token prediction heads, built *after* the trunk is initialised so the trunk's
+        # initial weights are identical with and without MTP (a fair comparison)
+        self.mtp = None
+        self.last_mtp_losses: list[torch.Tensor] = []   # per-depth MTP losses (detached) of the last training forward
+        if cfg.mtp_depth > 0:
+            from .mtp import MultiTokenPrediction   # imported here: mtp.py builds on this module
+            self.mtp = MultiTokenPrediction(cfg)
+            self.mtp.apply(self._init_weights)
+            for name, p in self.mtp.named_parameters():
+                if name.endswith(("wo.weight", "w_down.weight")):
+                    nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * cfg.n_layers))
 
     @staticmethod
     def _init_weights(m):
@@ -154,8 +218,45 @@ class GPT(nn.Module):
         elif isinstance(m, nn.Embedding):
             nn.init.normal_(m.weight, mean=0.0, std=0.02)
 
-    def num_params(self) -> int:
-        return sum(p.numel() for p in self.parameters())
+    def _build_rope(self, max_len: int | None = None):
+        cfg = self.cfg
+        max_len = max(max_len or 0, cfg.context_length * 2, cfg.max_seq_len)
+        cos, sin = rope_tables(cfg.rope_dim, max_len, cfg.rope_theta, cfg.rope_scaling, cfg.rope_factor,
+                               cfg.rope_original_context or cfg.context_length)
+        device = self.rope_cos.device if hasattr(self, "rope_cos") else None
+        self.register_buffer("rope_cos", cos.to(device), persistent=False)
+        self.register_buffer("rope_sin", sin.to(device), persistent=False)
+
+    def set_rope_scaling(self, kind: str, factor: float = 1.0, original_len: int | None = None,
+                         max_len: int | None = None):
+        """Switch RoPE scaling on a (trained) model, e.g. set_rope_scaling("yarn", 4) for 4× context.
+
+        original_len defaults to the length RoPE was trained at (cfg.context_length). kind "" keeps
+        plain RoPE; max_len only enlarges the table (to test plain RoPE past its training length).
+        """
+        cfg = self.cfg
+        cfg.rope_original_context = original_len or cfg.rope_original_context or cfg.context_length
+        cfg.rope_scaling, cfg.rope_factor = kind, float(factor)
+        self._build_rope(max_len)
+        return self
+
+    def merge_mla_weights(self):
+        """Inference only: precompute MLA's absorbed matrices (W_uk·W_q, W_o·W_uv) in every layer.
+
+        Switches the model to eval mode; calling .train() drops the merged copies again.
+        """
+        from .mla import MLAttention
+        self.eval()
+        for b in self.blocks:
+            if isinstance(b.attn, MLAttention):
+                b.attn.merge_weights()
+        return self
+
+    def num_params(self, include_mtp: bool = True) -> int:
+        n = sum(p.numel() for p in self.parameters())
+        if not include_mtp and self.mtp is not None:
+            n -= sum(p.numel() for p in self.mtp.parameters())   # embedding / head are shared, not counted twice
+        return n
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None,
                 cache: KVCache | None = None, all_logits: bool = False):
@@ -164,18 +265,50 @@ class GPT(nn.Module):
         assert start + T <= self.rope_cos.shape[0], "sequence longer than RoPE table"
         cos, sin = self.rope_cos[start:start + T], self.rope_sin[start:start + T]
         x = self.tok_emb(idx)
-        for block in self.blocks:
-            x = block(x, cos, sin, cache)
+        for i, block in enumerate(self.blocks):
+            if should_checkpoint(self, i, cache):   # drop activations now, recompute them in backward
+                x = checkpoint(block, x, cos, sin)
+            else:
+                x = block(x, cos, sin, cache)
+        h = x                                    # trunk output before the final norm (input to MTP)
         x = self.norm(x)
         if targets is None:
             if all_logits:
-                return self.lm_head(x), None
-            return self.lm_head(x[:, -1:, :]), None    # only the last position is needed
-        logits = self.lm_head(x)
+                return self.logits(x), None
+            return self.logits(x[:, -1:, :]), None    # only the last position is needed
+        logits = self.logits(x)
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-100)
+        if self.mtp is not None and self.training:   # train-only: eval loss stays the plain next-token loss
+            mtp = self.mtp.losses(h, idx, targets, self.tok_emb, self.logits, cos, sin)
+            self.last_mtp_losses = [m.detach() for m in mtp]
+            if mtp:
+                loss = loss + self.cfg.mtp_weight * torch.stack(mtp).mean()
+        if self.cfg.n_experts > 0 and self.training:
+            loss = loss + self.cfg.moe_aux_weight * self.moe_aux_loss()
         return logits, loss
 
-    def configure_optimizer(self, lr: float, weight_decay: float = 0.1, betas=(0.9, 0.95)):
+    def logits(self, x: torch.Tensor) -> torch.Tensor:
+        """Vocabulary logits, optionally soft-capped (Gemma 2 uses final_softcap=30)."""
+        return softcap(self.lm_head(x), self.cfg.final_softcap)
+
+    def new_cache(self) -> KVCache:
+        """A KV cache that trims sliding-window layers to a rolling buffer."""
+        return KVCache(self.cfg.n_layers, [b.attn.window for b in self.blocks])
+
+    def moe_aux_loss(self) -> torch.Tensor:
+        """Mean load-balancing loss over MoE layers (from the most recent forward)."""
+        blocks = list(self.blocks)
+        if self.mtp is not None and self.training:   # MTP blocks only run in training
+            blocks += [m.block for m in self.mtp.depths]
+        losses = [b.ffn.aux_loss for b in blocks if isinstance(b.ffn, MoEFFN)]
+        return torch.stack(losses).mean() if losses else torch.tensor(0.0)
+
+    def configure_optimizer(self, lr: float, weight_decay: float = 0.1, betas=(0.9, 0.95), optimizer: str = "adamw"):
+        if optimizer == "muon":  # Muon on hidden matrices, AdamW on the rest. See llm/muon.py
+            from .muon import Muon, muon_param_groups
+            return Muon(muon_param_groups(self, weight_decay), lr=lr, betas=betas)
+        if optimizer != "adamw":
+            raise ValueError(f"unknown optimizer {optimizer!r} (use 'adamw' or 'muon')")
         # no weight decay on norms / 1-D params (standard practice)
         decay = [p for p in self.parameters() if p.requires_grad and p.dim() >= 2]
         no_decay = [p for p in self.parameters() if p.requires_grad and p.dim() < 2]
