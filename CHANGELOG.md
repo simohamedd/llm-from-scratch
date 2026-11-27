@@ -3,6 +3,25 @@
 One entry per daily improvement (newest first). Work lands on `develop`; merge `develop` → `main`
 when you're happy with it.
 
+## 2026-11-27 — int4 group-wise quantization (GGUF Q4_0 / Q4_1 style)
+- `llm/quantize.py`: `quantize_groups_int4()` / `dequantize_groups_int4()` (one fp16 scale per `group_size` input
+  weights; Q4_0 symmetric `d = m / -8` with the signed max so the extreme lands exactly on −8, Q4_1 asymmetric
+  scale + min; zero-pads a partial last group; `group_size=0` = per-row), `pack_int4()` / `unpack_int4()` (two codes
+  per uint8), `Int4Linear` (weight-only: dequantize + `F.linear`; read-only `.weight` property so MLA's absorbed path
+  works), `quantize_int4(model, group_size=32, symmetric=True)` (skips `lm_head` and MoE routers),
+  `bits_per_weight()` (counts stored codes + scales + offsets, int8 too). `scripts/eval_quant.py` (fp32 / int8 /
+  Q4_0 / Q4_1 × group sizes: bits, MB, weight error, val loss, top-1 agreement). Opt-in: int8 path unchanged
+- `tests/test_22_int4_quantization.py` (16 tests: pack/unpack round-trip + nibble order, per-element error ≤ ½ step
+  (Q4_1) / 1 step (Q4_0 clip), Q4_0 extreme exact, Q4_1 beats Q4_0 on shifted weights, smaller groups → lower error
+  with planted outliers, padding, all-zero groups, bad group size, model close + smaller than int8, bits/weight =
+  4.5 / 5.0, state_dict round-trip, MoE (router kept fp32) / MLA / MTP + generation); full suite: 150 passed
+- Measured (Tiny Shakespeare, vocab 512, 400 steps, 128 val windows): micro (4.6 M) fp32 val 2.723 / 18.30 MB; int8
+  2.723 / 5.09 MB; **Q4_0 g=32 2.723 / 3.09 MB at 4.50 bits per weight** (weight error 0.086, 93.7 % top-1 agreement);
+  Q4_1 g=32 2.728 (5.0 bits); Q4_0 g=16 / 64 / 128 2.724 / 2.724 / 2.726; per-row Q4_0 2.725 (4.05 bits). nano: fp32
+  2.899, Q4_0 g=32 2.901. Group size and Q4_1 lower weight error (0.114 per-row → 0.065 Q4_1 g=16) but **make no
+  measurable loss difference at this scale** (no outlier weights yet). Decoding is slower on CPU (no fused kernel):
+  micro 473 → 127 tok/s, nano 1006 → 402. Doc: `docs/advanced/int4-quantization.md`
+
 ## 2026-11-26 — Batched generation with left padding + key-padding attention masks
 - `llm/batching.py`: `left_pad()` (pads on the left so every row ends in the same column), `padded_attention_mask()`
   (causal / sliding-window mask AND `cache.key_valid`, plus "always see yourself" so pad queries never get an all
